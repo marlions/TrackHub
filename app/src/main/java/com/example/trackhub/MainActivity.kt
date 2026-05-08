@@ -1,5 +1,17 @@
 package com.example.trackhub
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
@@ -57,6 +69,15 @@ import java.net.URL
 import java.net.URLEncoder
 
 private const val BASE_URL = "http://10.0.2.2:8000"
+
+private val TrackHubBackground = Color(0xFF050505)
+private val TrackHubSurface = Color(0xFF0B0B0D)
+private val TrackHubSurfaceLight = Color(0xFF111114)
+private val TrackHubGold = Color(0xFFD49A00)
+private val TrackHubGoldLight = Color(0xFFFFC84D)
+private val TrackHubText = Color(0xFFF4F4F4)
+private val TrackHubMutedText = Color(0xFF9E9E9E)
+private val TrackHubBorder = Color(0xFF2A2418)
 
 data class Track(
     val id: Int,
@@ -121,142 +142,398 @@ fun AuthScreen(
 
     var isRegisterMode by remember { mutableStateOf(false) }
 
-    var username by remember { mutableStateOf("testuser") }
+    var username by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("test@example.com") }
     var password by remember { mutableStateOf("12345678") }
 
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF020202),
+                        Color(0xFF070707),
+                        Color(0xFF000000)
+                    )
+                )
+            )
+            .padding(horizontal = 22.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "TrackHub",
-            style = MaterialTheme.typography.headlineLarge
-        )
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            TrackHubLogo()
 
-        Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
-        Text(
-            text = if (isRegisterMode) "Регистрация" else "Вход",
-            style = MaterialTheme.typography.headlineSmall
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        if (isRegisterMode) {
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Имя пользователя") },
-                singleLine = true
+            AuthModeSwitcher(
+                isRegisterMode = isRegisterMode,
+                onLoginClick = {
+                    errorText = null
+                    isRegisterMode = false
+                },
+                onRegisterClick = {
+                    errorText = null
+                    isRegisterMode = true
+                }
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
-        }
+            Spacer(modifier = Modifier.height(24.dp))
 
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Email") },
-            singleLine = true
-        )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 18.dp,
+                        shape = RoundedCornerShape(28.dp),
+                        ambientColor = Color.Black,
+                        spotColor = TrackHubGold.copy(alpha = 0.18f)
+                    )
+                    .background(
+                        color = TrackHubSurface.copy(alpha = 0.94f),
+                        shape = RoundedCornerShape(28.dp)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = TrackHubBorder,
+                        shape = RoundedCornerShape(28.dp)
+                    )
+                    .padding(22.dp)
+            ) {
+                if (isRegisterMode) {
+                    Text(
+                        text = "Имя пользователя",
+                        color = TrackHubText,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
 
-        Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Пароль") },
-            singleLine = true
-        )
+                    TrackHubTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        placeholder = "Введите имя пользователя",
+                        leadingIcon = "👤"
+                    )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = validateAndSubmit@{
-                val trimmedUsername = username.trim()
-                val trimmedEmail = email.trim()
-                val trimmedPassword = password.trim()
-
-                errorText = null
-
-                if (isRegisterMode && trimmedUsername.length < 3) {
-                    errorText = "Имя пользователя должно содержать минимум 3 символа"
-                    return@validateAndSubmit
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                if (trimmedEmail.isBlank() || !trimmedEmail.contains("@")) {
-                    errorText = "Введите корректный email"
-                    return@validateAndSubmit
-                }
+                Text(
+                    text = "Email",
+                    color = TrackHubText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
 
-                if (trimmedPassword.length < 6) {
-                    errorText = "Пароль должен содержать минимум 6 символов"
-                    return@validateAndSubmit
-                }
+                Spacer(modifier = Modifier.height(8.dp))
 
-                scope.launch {
-                    isLoading = true
-                    errorText = null
+                TrackHubTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    placeholder = "Введите ваш email",
+                    leadingIcon = "✉"
+                )
 
-                    try {
-                        val token = if (isRegisterMode) {
-                            registerUser(trimmedUsername, trimmedEmail, trimmedPassword)
-                        } else {
-                            loginUser(trimmedEmail, trimmedPassword)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Пароль",
+                    color = TrackHubText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TrackHubTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    placeholder = "Введите ваш пароль",
+                    leadingIcon = "🔒",
+                    trailingIcon = "◉"
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Забыли пароль?",
+                    color = TrackHubGoldLight,
+                    fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.End)
+                )
+
+                Spacer(modifier = Modifier.height(22.dp))
+
+                GoldPrimaryButton(
+                    text = if (isRegisterMode) "Зарегистрироваться" else "Войти",
+                    enabled = !isLoading,
+                    onClick = validateAndSubmit@{
+                        val trimmedUsername = username.trim()
+                        val trimmedEmail = email.trim()
+                        val trimmedPassword = password.trim()
+
+                        errorText = null
+
+                        if (isRegisterMode && trimmedUsername.length < 3) {
+                            errorText = "Имя пользователя должно содержать минимум 3 символа"
+                            return@validateAndSubmit
                         }
 
-                        onAuthSuccess(token)
-                    } catch (e: Exception) {
-                        errorText = "Не удалось выполнить запрос. Проверьте данные или подключение к серверу."
-                    } finally {
-                        isLoading = false
+                        if (trimmedEmail.isBlank() || !trimmedEmail.contains("@")) {
+                            errorText = "Введите корректный email"
+                            return@validateAndSubmit
+                        }
+
+                        if (trimmedPassword.length < 6) {
+                            errorText = "Пароль должен содержать минимум 6 символов"
+                            return@validateAndSubmit
+                        }
+
+                        scope.launch {
+                            isLoading = true
+                            errorText = null
+
+                            try {
+                                val token = if (isRegisterMode) {
+                                    registerUser(trimmedUsername, trimmedEmail, trimmedPassword)
+                                } else {
+                                    loginUser(trimmedEmail, trimmedPassword)
+                                }
+
+                                onAuthSuccess(token)
+                            } catch (e: Exception) {
+                                errorText = "Не удалось выполнить запрос. Проверьте данные или подключение к серверу."
+                            } finally {
+                                isLoading = false
+                            }
+                        }
                     }
+                )
+
+                if (isLoading) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    CircularProgressIndicator(
+                        color = TrackHubGoldLight
+                    )
                 }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading
-        ) {
-            Text(if (isRegisterMode) "Зарегистрироваться" else "Войти")
-        }
 
-        Spacer(modifier = Modifier.height(8.dp))
+                errorText?.let {
+                    Spacer(modifier = Modifier.height(16.dp))
 
-        TextButton(
-            onClick = {
-                errorText = null
-                isRegisterMode = !isRegisterMode
+                    Text(
+                        text = it,
+                        color = Color(0xFFFF6B6B),
+                        fontSize = 14.sp,
+                        lineHeight = 19.sp
+                    )
+                }
             }
-        ) {
-            Text(
-                if (isRegisterMode) {
-                    "Уже есть аккаунт? Войти"
+        }
+    }
+}
+
+@Composable
+fun TrackHubLogo() {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "◖◗",
+            color = TrackHubGoldLight,
+            fontSize = 44.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "TrackHub",
+            fontSize = 44.sp,
+            fontWeight = FontWeight.Bold,
+            color = TrackHubText
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Музыка всегда рядом ♫",
+            color = TrackHubMutedText,
+            fontSize = 18.sp
+        )
+    }
+}
+
+@Composable
+fun AuthModeSwitcher(
+    isRegisterMode: Boolean,
+    onLoginClick: () -> Unit,
+    onRegisterClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .background(
+                color = TrackHubSurfaceLight,
+                shape = RoundedCornerShape(32.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = TrackHubBorder,
+                shape = RoundedCornerShape(32.dp)
+            )
+            .padding(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        AuthTabButton(
+            text = "↪  Вход",
+            isSelected = !isRegisterMode,
+            onClick = onLoginClick,
+            modifier = Modifier.weight(1f)
+        )
+
+        AuthTabButton(
+            text = "♙  Регистрация",
+            isSelected = isRegisterMode,
+            onClick = onRegisterClick,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+fun AuthTabButton(
+    text: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                brush = if (isSelected) {
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            TrackHubGold,
+                            TrackHubGoldLight,
+                            TrackHubGold
+                        )
+                    )
                 } else {
-                    "Нет аккаунта? Зарегистрироваться"
-                }
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Transparent
+                        )
+                    )
+                },
+                shape = RoundedCornerShape(28.dp)
             )
-        }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (isSelected) Color.White else TrackHubMutedText,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
 
-        if (isLoading) {
-            Spacer(modifier = Modifier.height(12.dp))
-            CircularProgressIndicator()
-        }
-
-        errorText?.let {
-            Spacer(modifier = Modifier.height(12.dp))
+@Composable
+fun TrackHubTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    leadingIcon: String,
+    trailingIcon: String? = null
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        placeholder = {
             Text(
-                text = "Ошибка: $it",
-                color = MaterialTheme.colorScheme.error
+                text = placeholder,
+                color = TrackHubMutedText
             )
-        }
+        },
+        leadingIcon = {
+            Text(
+                text = leadingIcon,
+                color = TrackHubGoldLight,
+                fontSize = 20.sp
+            )
+        },
+        trailingIcon = trailingIcon?.let {
+            {
+                Text(
+                    text = it,
+                    color = TrackHubGoldLight,
+                    fontSize = 18.sp
+                )
+            }
+        },
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+@Composable
+fun GoldPrimaryButton(
+    text: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .shadow(
+                elevation = 10.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = TrackHubGold.copy(alpha = 0.35f),
+                spotColor = TrackHubGold.copy(alpha = 0.35f)
+            )
+            .background(
+                brush = if (enabled) {
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFFB47A00),
+                            Color(0xFFFFC04D),
+                            Color(0xFFB47A00)
+                        )
+                    )
+                } else {
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFF4A4A4A),
+                            Color(0xFF5A5A5A)
+                        )
+                    )
+                },
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "$text   ›",
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
