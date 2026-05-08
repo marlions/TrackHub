@@ -1,10 +1,14 @@
 package com.example.trackhub
 
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,6 +51,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -269,9 +274,11 @@ fun CatalogScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var currentTrackTitle by remember { mutableStateOf<String?>(null) }
+
     var selectedTrackForComments by remember { mutableStateOf<Track?>(null) }
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
     var showPlaylistsScreen by remember { mutableStateOf(false) }
+    var showUploadTrackScreen by remember { mutableStateOf(false) }
 
     val player = remember {
         ExoPlayer.Builder(context).build()
@@ -349,6 +356,23 @@ fun CatalogScreen(
             accessToken = accessToken,
             onBack = closePlaylists
         )
+    } else if (showUploadTrackScreen) {
+        val closeUploadScreen = {
+            showUploadTrackScreen = false
+            loadTracks(searchQuery)
+        }
+
+        BackHandler {
+            closeUploadScreen()
+        }
+
+        UploadTrackScreen(
+            accessToken = accessToken,
+            onBack = closeUploadScreen,
+            onUploadSuccess = {
+                closeUploadScreen()
+            }
+        )
     } else {
         Scaffold(
             topBar = {
@@ -424,6 +448,16 @@ fun CatalogScreen(
                     ) {
                         Text("Мои плейлисты")
                     }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = {
+                        showUploadTrackScreen = true
+                    }
+                ) {
+                    Text("Загрузить трек")
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1134,6 +1168,174 @@ fun PlaylistsScreen(
     }
 }
 
+@Composable
+fun UploadTrackScreen(
+    accessToken: String,
+    onBack: () -> Unit,
+    onUploadSuccess: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var title by remember { mutableStateOf("") }
+    var author by remember { mutableStateOf("") }
+    var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedFileName by remember { mutableStateOf<String?>(null) }
+
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    var successText by remember { mutableStateOf<String?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        selectedFileUri = uri
+        selectedFileName = uri?.let { getFileName(context, it) }
+        errorText = null
+        successText = null
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        TextButton(
+            onClick = onBack
+        ) {
+            Text("← Назад")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Загрузка трека",
+            style = MaterialTheme.typography.headlineSmall
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = title,
+            onValueChange = { title = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Название трека") },
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = author,
+            onValueChange = { author = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Автор") },
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = {
+                filePickerLauncher.launch("audio/*")
+            },
+            enabled = !isLoading
+        ) {
+            Text("Выбрать аудиофайл")
+        }
+
+        selectedFileName?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Выбран файл: $it",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = uploadButton@{
+                val trimmedTitle = title.trim()
+                val trimmedAuthor = author.trim()
+                val fileUri = selectedFileUri
+
+                errorText = null
+                successText = null
+
+                if (trimmedTitle.isBlank()) {
+                    errorText = "Введите название трека"
+                    return@uploadButton
+                }
+
+                if (trimmedAuthor.isBlank()) {
+                    errorText = "Введите автора трека"
+                    return@uploadButton
+                }
+
+                if (fileUri == null) {
+                    errorText = "Выберите аудиофайл"
+                    return@uploadButton
+                }
+
+                scope.launch {
+                    isLoading = true
+                    errorText = null
+                    successText = null
+
+                    try {
+                        uploadTrack(
+                            context = context,
+                            title = trimmedTitle,
+                            author = trimmedAuthor,
+                            fileUri = fileUri,
+                            accessToken = accessToken
+                        )
+
+                        successText = "Трек успешно загружен"
+                        title = ""
+                        author = ""
+                        selectedFileUri = null
+                        selectedFileName = null
+
+                        onUploadSuccess()
+                    } catch (e: Exception) {
+                        errorText = e.message ?: "Ошибка загрузки трека"
+                    } finally {
+                        isLoading = false
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading
+        ) {
+            Text("Загрузить")
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (isLoading) {
+            CircularProgressIndicator()
+        }
+
+        successText?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        errorText?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Ошибка: $it",
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+    }
+}
+
 suspend fun loginUser(
     email: String,
     password: String
@@ -1510,6 +1712,125 @@ suspend fun fetchPlaylistTracks(
             connection.disconnect()
         }
     }
+}
+
+suspend fun uploadTrack(
+    context: Context,
+    title: String,
+    author: String,
+    fileUri: Uri,
+    accessToken: String
+): Track {
+    return withContext(Dispatchers.IO) {
+        val boundary = "TrackHubBoundary${System.currentTimeMillis()}"
+        val url = URL("$BASE_URL/api/tracks/upload")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 15000
+            connection.readTimeout = 30000
+            connection.doOutput = true
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty(
+                "Content-Type",
+                "multipart/form-data; boundary=$boundary"
+            )
+
+            val fileName = getFileName(context, fileUri).replace("\"", "")
+            val contentType = context.contentResolver.getType(fileUri) ?: "audio/mpeg"
+
+            DataOutputStream(connection.outputStream).use { output ->
+                writeFormField(
+                    output = output,
+                    boundary = boundary,
+                    name = "title",
+                    value = title
+                )
+
+                writeFormField(
+                    output = output,
+                    boundary = boundary,
+                    name = "author",
+                    value = author
+                )
+
+                output.writeBytes("--$boundary\r\n")
+                output.writeBytes(
+                    "Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n"
+                )
+                output.writeBytes("Content-Type: $contentType\r\n")
+                output.writeBytes("\r\n")
+
+                context.contentResolver.openInputStream(fileUri)?.use { input ->
+                    val buffer = ByteArray(8192)
+
+                    while (true) {
+                        val bytesRead = input.read(buffer)
+
+                        if (bytesRead == -1) {
+                            break
+                        }
+
+                        output.write(buffer, 0, bytesRead)
+                    }
+                } ?: throw RuntimeException("Не удалось открыть выбранный файл")
+
+                output.writeBytes("\r\n")
+                output.writeBytes("--$boundary--\r\n")
+                output.flush()
+            }
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val item = JSONObject(responseText)
+
+            Track(
+                id = item.getInt("id"),
+                title = item.getString("title"),
+                author = item.getString("author"),
+                streamUrl = item.getString("stream_url"),
+                likesCount = item.optInt("likes_count", 0),
+                commentsCount = item.optInt("comments_count", 0)
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+fun writeFormField(
+    output: DataOutputStream,
+    boundary: String,
+    name: String,
+    value: String
+) {
+    output.writeBytes("--$boundary\r\n")
+    output.writeBytes("Content-Disposition: form-data; name=\"$name\"\r\n")
+    output.writeBytes("\r\n")
+    output.write(value.toByteArray(Charsets.UTF_8))
+    output.writeBytes("\r\n")
+}
+
+fun getFileName(
+    context: Context,
+    uri: Uri
+): String {
+    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+
+        if (nameIndex >= 0 && cursor.moveToFirst()) {
+            return cursor.getString(nameIndex)
+        }
+    }
+
+    return "audio_${System.currentTimeMillis()}.mp3"
 }
 
 fun readResponseText(connection: HttpURLConnection): String {
