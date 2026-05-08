@@ -162,21 +162,42 @@ fun AuthScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            onClick = {
+            onClick = validateAndSubmit@{
+                val trimmedUsername = username.trim()
+                val trimmedEmail = email.trim()
+                val trimmedPassword = password.trim()
+
+                errorText = null
+
+                if (isRegisterMode && trimmedUsername.length < 3) {
+                    errorText = "Имя пользователя должно содержать минимум 3 символа"
+                    return@validateAndSubmit
+                }
+
+                if (trimmedEmail.isBlank() || !trimmedEmail.contains("@")) {
+                    errorText = "Введите корректный email"
+                    return@validateAndSubmit
+                }
+
+                if (trimmedPassword.length < 6) {
+                    errorText = "Пароль должен содержать минимум 6 символов"
+                    return@validateAndSubmit
+                }
+
                 scope.launch {
                     isLoading = true
                     errorText = null
 
                     try {
                         val token = if (isRegisterMode) {
-                            registerUser(username, email, password)
+                            registerUser(trimmedUsername, trimmedEmail, trimmedPassword)
                         } else {
-                            loginUser(email, password)
+                            loginUser(trimmedEmail, trimmedPassword)
                         }
 
                         onAuthSuccess(token)
                     } catch (e: Exception) {
-                        errorText = e.message ?: "Ошибка авторизации"
+                        errorText = "Не удалось выполнить запрос. Проверьте данные или подключение к серверу."
                     } finally {
                         isLoading = false
                     }
