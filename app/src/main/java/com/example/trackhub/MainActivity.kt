@@ -560,7 +560,6 @@ suspend fun fetchTracks(query: String): List<Track> {
     }
 }
 
-
 suspend fun likeTrack(
     trackId: Int,
     accessToken: String
