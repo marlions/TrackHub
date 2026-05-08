@@ -69,6 +69,12 @@ data class TrackComment(
     val createdAt: String
 )
 
+data class Playlist(
+    val id: Int,
+    val name: String,
+    val tracksCount: Int
+)
+
 class MainActivity : ComponentActivity() {
     @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -264,6 +270,8 @@ fun CatalogScreen(
     var errorText by remember { mutableStateOf<String?>(null) }
     var currentTrackTitle by remember { mutableStateOf<String?>(null) }
     var selectedTrackForComments by remember { mutableStateOf<Track?>(null) }
+    var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
+    var showPlaylistsScreen by remember { mutableStateOf(false) }
 
     val player = remember {
         ExoPlayer.Builder(context).build()
@@ -294,9 +302,10 @@ fun CatalogScreen(
         loadTracks()
     }
 
-    val selectedTrack = selectedTrackForComments
+    val selectedCommentsTrack = selectedTrackForComments
+    val selectedPlaylistTrack = selectedTrackForPlaylist
 
-    if (selectedTrack != null) {
+    if (selectedCommentsTrack != null) {
         val closeComments = {
             selectedTrackForComments = null
             loadTracks(searchQuery)
@@ -307,9 +316,38 @@ fun CatalogScreen(
         }
 
         CommentsScreen(
-            track = selectedTrack,
+            track = selectedCommentsTrack,
             accessToken = accessToken,
             onBack = closeComments
+        )
+    } else if (selectedPlaylistTrack != null) {
+        val closePlaylistAdd = {
+            selectedTrackForPlaylist = null
+            loadTracks(searchQuery)
+        }
+
+        BackHandler {
+            closePlaylistAdd()
+        }
+
+        AddToPlaylistScreen(
+            track = selectedPlaylistTrack,
+            accessToken = accessToken,
+            onBack = closePlaylistAdd
+        )
+    } else if (showPlaylistsScreen) {
+        val closePlaylists = {
+            showPlaylistsScreen = false
+            loadTracks(searchQuery)
+        }
+
+        BackHandler {
+            closePlaylists()
+        }
+
+        PlaylistsScreen(
+            accessToken = accessToken,
+            onBack = closePlaylists
         )
     } else {
         Scaffold(
@@ -367,13 +405,25 @@ fun CatalogScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Button(
-                    onClick = {
-                        searchQuery = ""
-                        loadTracks()
-                    }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Все треки")
+                    Button(
+                        onClick = {
+                            searchQuery = ""
+                            loadTracks()
+                        }
+                    ) {
+                        Text("Все треки")
+                    }
+
+                    Button(
+                        onClick = {
+                            showPlaylistsScreen = true
+                        }
+                    ) {
+                        Text("Мои плейлисты")
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -443,6 +493,9 @@ fun CatalogScreen(
                             },
                             onCommentsClick = {
                                 selectedTrackForComments = track
+                            },
+                            onAddToPlaylistClick = {
+                                selectedTrackForPlaylist = track
                             }
                         )
                     }
@@ -457,7 +510,8 @@ fun TrackCard(
     track: Track,
     onPlayClick: () -> Unit,
     onLikeClick: () -> Unit,
-    onCommentsClick: () -> Unit
+    onCommentsClick: () -> Unit,
+    onAddToPlaylistClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -485,25 +539,39 @@ fun TrackCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
-                    onClick = onPlayClick
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Play")
+                    Button(
+                        onClick = onPlayClick
+                    ) {
+                        Text("Play")
+                    }
+
+                    Button(
+                        onClick = onLikeClick
+                    ) {
+                        Text("Лайк")
+                    }
                 }
 
-                Button(
-                    onClick = onLikeClick
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Лайк")
-                }
+                    Button(
+                        onClick = onCommentsClick
+                    ) {
+                        Text("Комментарии")
+                    }
 
-                Button(
-                    onClick = onCommentsClick
-                ) {
-                    Text("Комментарии")
+                    Button(
+                        onClick = onAddToPlaylistClick
+                    ) {
+                        Text("В плейлист")
+                    }
                 }
             }
         }
@@ -650,6 +718,415 @@ fun CommentsScreen(
                             text = comment.text,
                             style = MaterialTheme.typography.bodyMedium
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AddToPlaylistScreen(
+    track: Track,
+    accessToken: String,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    var playlistName by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    var successText by remember { mutableStateOf<String?>(null) }
+
+    fun loadPlaylists() {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                playlists = fetchPlaylists(accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки плейлистов"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadPlaylists()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        TextButton(
+            onClick = onBack
+        ) {
+            Text("← Назад")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Добавить в плейлист",
+            style = MaterialTheme.typography.headlineSmall
+        )
+
+        Text(
+            text = "${track.title} — ${track.author}",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = playlistName,
+            onValueChange = { playlistName = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Название нового плейлиста") },
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                val trimmedName = playlistName.trim()
+
+                if (trimmedName.isBlank()) {
+                    errorText = "Название плейлиста не должно быть пустым"
+                    return@Button
+                }
+
+                scope.launch {
+                    isLoading = true
+                    errorText = null
+                    successText = null
+
+                    try {
+                        createPlaylist(trimmedName, accessToken)
+                        playlistName = ""
+                        playlists = fetchPlaylists(accessToken)
+                        successText = "Плейлист создан"
+                    } catch (e: Exception) {
+                        errorText = e.message ?: "Ошибка создания плейлиста"
+                    } finally {
+                        isLoading = false
+                    }
+                }
+            },
+            enabled = !isLoading
+        ) {
+            Text("Создать плейлист")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Мои плейлисты",
+            style = MaterialTheme.typography.titleLarge
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (isLoading) {
+            CircularProgressIndicator()
+        }
+
+        successText?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        errorText?.let {
+            Text(
+                text = "Ошибка: $it",
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(playlists) { playlist ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = playlist.name,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+
+                        Text(
+                            text = "Треков: ${playlist.tracksCount}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    isLoading = true
+                                    errorText = null
+                                    successText = null
+
+                                    try {
+                                        addTrackToPlaylist(
+                                            playlistId = playlist.id,
+                                            trackId = track.id,
+                                            accessToken = accessToken
+                                        )
+
+                                        playlists = fetchPlaylists(accessToken)
+                                        successText = "Трек добавлен в плейлист"
+                                    } catch (e: Exception) {
+                                        errorText = e.message ?: "Ошибка добавления в плейлист"
+                                    } finally {
+                                        isLoading = false
+                                    }
+                                }
+                            },
+                            enabled = !isLoading
+                        ) {
+                            Text("Добавить")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PlaylistsScreen(
+    accessToken: String,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    var selectedPlaylist by remember { mutableStateOf<Playlist?>(null) }
+    var playlistTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var playlistName by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    fun loadPlaylists() {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                playlists = fetchPlaylists(accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки плейлистов"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun openPlaylist(playlist: Playlist) {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                selectedPlaylist = playlist
+                playlistTracks = fetchPlaylistTracks(playlist.id, accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки треков плейлиста"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadPlaylists()
+    }
+
+    val currentPlaylist = selectedPlaylist
+
+    if (currentPlaylist != null) {
+        BackHandler {
+            selectedPlaylist = null
+            playlistTracks = emptyList()
+            loadPlaylists()
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            TextButton(
+                onClick = {
+                    selectedPlaylist = null
+                    playlistTracks = emptyList()
+                    loadPlaylists()
+                }
+            ) {
+                Text("← Назад к плейлистам")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = currentPlaylist.name,
+                style = MaterialTheme.typography.headlineSmall
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (isLoading) {
+                CircularProgressIndicator()
+            }
+
+            if (playlistTracks.isEmpty() && !isLoading) {
+                Text("В этом плейлисте пока нет треков")
+            }
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(playlistTracks) { track ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Text(
+                                text = track.title,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+
+                            Text(
+                                text = track.author,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            TextButton(
+                onClick = onBack
+            ) {
+                Text("← Назад")
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Мои плейлисты",
+                style = MaterialTheme.typography.headlineSmall
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = playlistName,
+                onValueChange = { playlistName = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Название нового плейлиста") },
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    val trimmedName = playlistName.trim()
+
+                    if (trimmedName.isBlank()) {
+                        errorText = "Название плейлиста не должно быть пустым"
+                        return@Button
+                    }
+
+                    scope.launch {
+                        isLoading = true
+                        errorText = null
+
+                        try {
+                            createPlaylist(trimmedName, accessToken)
+                            playlistName = ""
+                            playlists = fetchPlaylists(accessToken)
+                        } catch (e: Exception) {
+                            errorText = e.message ?: "Ошибка создания плейлиста"
+                        } finally {
+                            isLoading = false
+                        }
+                    }
+                },
+                enabled = !isLoading
+            ) {
+                Text("Создать")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (isLoading) {
+                CircularProgressIndicator()
+            }
+
+            errorText?.let {
+                Text(
+                    text = "Ошибка: $it",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(playlists) { playlist ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Text(
+                                text = playlist.name,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+
+                            Text(
+                                text = "Треков: ${playlist.tracksCount}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Button(
+                                onClick = {
+                                    openPlaylist(playlist)
+                                }
+                            ) {
+                                Text("Открыть")
+                            }
+                        }
                     }
                 }
             }
@@ -867,6 +1344,168 @@ suspend fun addComment(
             if (responseCode !in 200..299) {
                 throw RuntimeException("Backend вернул код $responseCode: $responseText")
             }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun fetchPlaylists(
+    accessToken: String
+): List<Playlist> {
+    return withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/playlists")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val jsonArray = JSONArray(responseText)
+            val result = mutableListOf<Playlist>()
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+
+                result.add(
+                    Playlist(
+                        id = item.getInt("id"),
+                        name = item.getString("name"),
+                        tracksCount = item.optInt("tracks_count", 0)
+                    )
+                )
+            }
+
+            result
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun createPlaylist(
+    name: String,
+    accessToken: String
+): Playlist {
+    return withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/playlists")
+        val connection = url.openConnection() as HttpURLConnection
+
+        val body = JSONObject()
+            .put("name", name)
+
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.doOutput = true
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+
+            connection.outputStream.use { output ->
+                output.write(body.toString().toByteArray(Charsets.UTF_8))
+            }
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val item = JSONObject(responseText)
+
+            Playlist(
+                id = item.getInt("id"),
+                name = item.getString("name"),
+                tracksCount = item.optInt("tracks_count", 0)
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun addTrackToPlaylist(
+    playlistId: Int,
+    trackId: Int,
+    accessToken: String
+) {
+    withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/playlists/$playlistId/tracks/$trackId")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun fetchPlaylistTracks(
+    playlistId: Int,
+    accessToken: String
+): List<Track> {
+    return withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/playlists/$playlistId/tracks")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val jsonArray = JSONArray(responseText)
+            val result = mutableListOf<Track>()
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+
+                result.add(
+                    Track(
+                        id = item.getInt("id"),
+                        title = item.getString("title"),
+                        author = item.getString("author"),
+                        streamUrl = item.getString("stream_url"),
+                        likesCount = item.optInt("likes_count", 0),
+                        commentsCount = item.optInt("comments_count", 0)
+                    )
+                )
+            }
+
+            result
         } finally {
             connection.disconnect()
         }
