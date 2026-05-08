@@ -3,6 +3,7 @@ package com.example.trackhub
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Arrangement
@@ -59,6 +60,13 @@ data class Track(
     val streamUrl: String,
     val likesCount: Int,
     val commentsCount: Int
+)
+
+data class TrackComment(
+    val id: Int,
+    val text: String,
+    val username: String,
+    val createdAt: String
 )
 
 class MainActivity : ComponentActivity() {
@@ -255,6 +263,7 @@ fun CatalogScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
     var currentTrackTitle by remember { mutableStateOf<String?>(null) }
+    var selectedTrackForComments by remember { mutableStateOf<Track?>(null) }
 
     val player = remember {
         ExoPlayer.Builder(context).build()
@@ -285,136 +294,158 @@ fun CatalogScreen(
         loadTracks()
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text("TrackHub")
-                },
-                actions = {
-                    TextButton(
+    val selectedTrack = selectedTrackForComments
+
+    if (selectedTrack != null) {
+        val closeComments = {
+            selectedTrackForComments = null
+            loadTracks(searchQuery)
+        }
+
+        BackHandler {
+            closeComments()
+        }
+
+        CommentsScreen(
+            track = selectedTrack,
+            accessToken = accessToken,
+            onBack = closeComments
+        )
+    } else {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text("TrackHub")
+                    },
+                    actions = {
+                        TextButton(
+                            onClick = {
+                                player.pause()
+                                onLogout()
+                            }
+                        ) {
+                            Text("Выйти")
+                        }
+                    }
+                )
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Музыкальный каталог",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Поиск трека") },
+                        singleLine = true
+                    )
+
+                    Button(
                         onClick = {
-                            player.pause()
-                            onLogout()
+                            loadTracks(searchQuery)
                         }
                     ) {
-                        Text("Выйти")
+                        Text("Найти")
                     }
-                }
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "Музыкальный каталог",
-                style = MaterialTheme.typography.headlineSmall
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.weight(1f),
-                    label = { Text("Поиск трека") },
-                    singleLine = true
-                )
-
-                Button(
-                    onClick = {
-                        loadTracks(searchQuery)
-                    }
-                ) {
-                    Text("Найти")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Button(
-                onClick = {
-                    searchQuery = ""
-                    loadTracks()
-                }
-            ) {
-                Text("Все треки")
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            currentTrackTitle?.let {
-                Text(
-                    text = "Сейчас играет: $it",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = {
-                        player.pause()
-                    }
-                ) {
-                    Text("Пауза")
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-            }
 
-            if (isLoading) {
-                CircularProgressIndicator()
-            }
+                Button(
+                    onClick = {
+                        searchQuery = ""
+                        loadTracks()
+                    }
+                ) {
+                    Text("Все треки")
+                }
 
-            errorText?.let {
-                Text(
-                    text = "Ошибка: $it",
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
+                Spacer(modifier = Modifier.height(12.dp))
 
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(tracks) { track ->
-                    TrackCard(
-                        track = track,
-                        onPlayClick = {
-                            val fullStreamUrl = if (track.streamUrl.startsWith("http")) {
-                                track.streamUrl
-                            } else {
-                                BASE_URL + track.streamUrl
-                            }
-
-                            val mediaItem = MediaItem.fromUri(Uri.parse(fullStreamUrl))
-
-                            player.setMediaItem(mediaItem)
-                            player.prepare()
-                            player.play()
-
-                            currentTrackTitle = "${track.title} — ${track.author}"
-                        },
-                        onLikeClick = {
-                            scope.launch {
-                                errorText = null
-
-                                try {
-                                    likeTrack(track.id, accessToken)
-                                    loadTracks(searchQuery)
-                                } catch (e: Exception) {
-                                    errorText = e.message ?: "Ошибка лайка"
-                                }
-                            }
-                        }
+                currentTrackTitle?.let {
+                    Text(
+                        text = "Сейчас играет: $it",
+                        style = MaterialTheme.typography.bodyLarge
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            player.pause()
+                        }
+                    ) {
+                        Text("Пауза")
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                if (isLoading) {
+                    CircularProgressIndicator()
+                }
+
+                errorText?.let {
+                    Text(
+                        text = "Ошибка: $it",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(tracks) { track ->
+                        TrackCard(
+                            track = track,
+                            onPlayClick = {
+                                val fullStreamUrl = if (track.streamUrl.startsWith("http")) {
+                                    track.streamUrl
+                                } else {
+                                    BASE_URL + track.streamUrl
+                                }
+
+                                val mediaItem = MediaItem.fromUri(Uri.parse(fullStreamUrl))
+
+                                player.setMediaItem(mediaItem)
+                                player.prepare()
+                                player.play()
+
+                                currentTrackTitle = "${track.title} — ${track.author}"
+                            },
+                            onLikeClick = {
+                                scope.launch {
+                                    errorText = null
+
+                                    try {
+                                        likeTrack(track.id, accessToken)
+                                        loadTracks(searchQuery)
+                                    } catch (e: Exception) {
+                                        errorText = e.message ?: "Ошибка лайка"
+                                    }
+                                }
+                            },
+                            onCommentsClick = {
+                                selectedTrackForComments = track
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -425,7 +456,8 @@ fun CatalogScreen(
 fun TrackCard(
     track: Track,
     onPlayClick: () -> Unit,
-    onLikeClick: () -> Unit
+    onLikeClick: () -> Unit,
+    onCommentsClick: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -466,6 +498,159 @@ fun TrackCard(
                     onClick = onLikeClick
                 ) {
                     Text("Лайк")
+                }
+
+                Button(
+                    onClick = onCommentsClick
+                ) {
+                    Text("Комментарии")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CommentsScreen(
+    track: Track,
+    accessToken: String,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    var comments by remember { mutableStateOf<List<TrackComment>>(emptyList()) }
+    var commentText by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    fun loadComments() {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                comments = fetchComments(track.id)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки комментариев"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(track.id) {
+        loadComments()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        TextButton(
+            onClick = onBack
+        ) {
+            Text("← Назад")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.headlineSmall
+        )
+
+        Text(
+            text = track.author,
+            style = MaterialTheme.typography.bodyMedium
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Комментарии",
+            style = MaterialTheme.typography.titleLarge
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = commentText,
+            onValueChange = { commentText = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Ваш комментарий") },
+            minLines = 2
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                val trimmedText = commentText.trim()
+
+                if (trimmedText.isBlank()) {
+                    errorText = "Комментарий не должен быть пустым"
+                    return@Button
+                }
+
+                scope.launch {
+                    isLoading = true
+                    errorText = null
+
+                    try {
+                        addComment(track.id, trimmedText, accessToken)
+                        commentText = ""
+                        comments = fetchComments(track.id)
+                    } catch (e: Exception) {
+                        errorText = e.message ?: "Ошибка отправки комментария"
+                    } finally {
+                        isLoading = false
+                    }
+                }
+            },
+            enabled = !isLoading
+        ) {
+            Text("Отправить")
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (isLoading) {
+            CircularProgressIndicator()
+        }
+
+        errorText?.let {
+            Text(
+                text = "Ошибка: $it",
+                color = MaterialTheme.colorScheme.error
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(comments) { comment ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = comment.username,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = comment.text,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
             }
         }
@@ -595,6 +780,86 @@ suspend fun likeTrack(
             connection.readTimeout = 5000
             connection.setRequestProperty("Authorization", "Bearer $accessToken")
             connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun fetchComments(
+    trackId: Int
+): List<TrackComment> {
+    return withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/tracks/$trackId/comments")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val jsonArray = JSONArray(responseText)
+            val result = mutableListOf<TrackComment>()
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+
+                result.add(
+                    TrackComment(
+                        id = item.getInt("id"),
+                        text = item.getString("text"),
+                        username = item.optString("username", "Пользователь"),
+                        createdAt = item.optString("created_at", "")
+                    )
+                )
+            }
+
+            result
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun addComment(
+    trackId: Int,
+    text: String,
+    accessToken: String
+) {
+    withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/tracks/$trackId/comments")
+        val connection = url.openConnection() as HttpURLConnection
+
+        val body = JSONObject()
+            .put("text", text)
+
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.doOutput = true
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+
+            connection.outputStream.use { output ->
+                output.write(body.toString().toByteArray(Charsets.UTF_8))
+            }
 
             val responseCode = connection.responseCode
             val responseText = readResponseText(connection)
