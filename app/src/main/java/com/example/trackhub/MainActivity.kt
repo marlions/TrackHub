@@ -142,6 +142,12 @@ enum class MainTab {
     CREATE
 }
 
+enum class LibraryInnerScreen {
+    MAIN,
+    LIKED_TRACKS,
+    ALL_TRACKS
+}
+
 class MainActivity : ComponentActivity() {
     @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1086,6 +1092,7 @@ fun CatalogScreen(
     var errorText by remember { mutableStateOf<String?>(null) }
 
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
+    var libraryInnerScreen by remember { mutableStateOf(LibraryInnerScreen.MAIN) }
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var currentPositionMs by remember { mutableStateOf(0L) }
@@ -1274,6 +1281,11 @@ fun CatalogScreen(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
+            BackHandler(
+                enabled = currentTab == MainTab.LIBRARY && libraryInnerScreen != LibraryInnerScreen.MAIN
+            ) {
+                libraryInnerScreen = LibraryInnerScreen.MAIN
+            }
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -1340,15 +1352,82 @@ fun CatalogScreen(
                     }
 
                     MainTab.LIBRARY -> {
-                        LibraryTabScreen(
-                            tracks = tracks,
-                            onPlaylistsClick = {
-                                showPlaylistsScreen = true
-                            },
-                            onLikedTracksClick = {
-                                currentTab = MainTab.HOME
+                        when (libraryInnerScreen) {
+                            LibraryInnerScreen.MAIN -> {
+                                LibraryTabScreen(
+                                    tracks = tracks,
+                                    onPlaylistsClick = {
+                                        showPlaylistsScreen = true
+                                    },
+                                    onLikedTracksClick = {
+                                        libraryInnerScreen = LibraryInnerScreen.LIKED_TRACKS
+                                    },
+                                    onAllTracksClick = {
+                                        libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
+                                    }
+                                )
                             }
-                        )
+
+                            LibraryInnerScreen.LIKED_TRACKS -> {
+                                LibraryTracksListScreen(
+                                    title = "Любимые треки",
+                                    subtitle = "Треки, которые получили лайки",
+                                    emptyText = "Пока нет любимых треков",
+                                    tracks = tracks.filter { it.likesCount > 0 },
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying,
+                                    onBack = {
+                                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                                    },
+                                    onPlayClick = { track ->
+                                        if (currentTrack?.id == track.id) {
+                                            togglePlayPause()
+                                        } else {
+                                            playTrack(track)
+                                        }
+                                    },
+                                    onLikeClick = { track ->
+                                        likeAndReload(track)
+                                    },
+                                    onCommentsClick = { track ->
+                                        selectedTrackForComments = track
+                                    },
+                                    onAddToPlaylistClick = { track ->
+                                        selectedTrackForPlaylist = track
+                                    }
+                                )
+                            }
+
+                            LibraryInnerScreen.ALL_TRACKS -> {
+                                LibraryTracksListScreen(
+                                    title = "Все треки",
+                                    subtitle = "Полный список доступных треков",
+                                    emptyText = "Пока нет загруженных треков",
+                                    tracks = tracks,
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying,
+                                    onBack = {
+                                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                                    },
+                                    onPlayClick = { track ->
+                                        if (currentTrack?.id == track.id) {
+                                            togglePlayPause()
+                                        } else {
+                                            playTrack(track)
+                                        }
+                                    },
+                                    onLikeClick = { track ->
+                                        likeAndReload(track)
+                                    },
+                                    onCommentsClick = { track ->
+                                        selectedTrackForComments = track
+                                    },
+                                    onAddToPlaylistClick = { track ->
+                                        selectedTrackForPlaylist = track
+                                    }
+                                )
+                            }
+                        }
                     }
 
                     MainTab.CREATE -> {
@@ -1380,10 +1459,15 @@ fun CatalogScreen(
                 currentTab = currentTab,
                 onTabClick = { tab ->
                     currentTab = tab
+
+                    if (tab != MainTab.LIBRARY) {
+                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                    }
                 }
             )
         }
     }
+
 }
 
 @Composable
@@ -2252,7 +2336,8 @@ fun EmptySearchResultCard(
 fun LibraryTabScreen(
     tracks: List<Track>,
     onPlaylistsClick: () -> Unit,
-    onLikedTracksClick: () -> Unit
+    onLikedTracksClick: () -> Unit,
+    onAllTracksClick: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -2293,13 +2378,135 @@ fun LibraryTabScreen(
                 title = "Все треки",
                 subtitle = "Всего треков: ${tracks.size}",
                 iconText = "tracks",
-                onClick = {}
+                onClick = onAllTracksClick
             )
         }
 
         item {
             Spacer(modifier = Modifier.height(110.dp))
         }
+    }
+}
+
+@Composable
+fun LibraryTracksListScreen(
+    title: String,
+    subtitle: String,
+    emptyText: String,
+    tracks: List<Track>,
+    currentTrack: Track?,
+    isPlaying: Boolean,
+    onBack: () -> Unit,
+    onPlayClick: (Track) -> Unit,
+    onLikeClick: (Track) -> Unit,
+    onCommentsClick: (Track) -> Unit,
+    onAddToPlaylistClick: (Track) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp)
+            .padding(top = 44.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            TextButton(
+                onClick = onBack,
+                modifier = Modifier.padding(start = 0.dp)
+            ) {
+                Text(
+                    text = "← Назад",
+                    color = TrackHubGoldLight,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        item {
+            Column {
+                Text(
+                    text = title,
+                    color = TrackHubText,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = subtitle,
+                    color = TrackHubMutedText,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        if (tracks.isEmpty()) {
+            item {
+                EmptyLibraryTracksCard(
+                    text = emptyText
+                )
+            }
+        }
+
+        items(tracks) { track ->
+            SearchTrackResultCard(
+                track = track,
+                isCurrentTrack = currentTrack?.id == track.id,
+                isPlaying = currentTrack?.id == track.id && isPlaying,
+                onPlayClick = { onPlayClick(track) },
+                onLikeClick = { onLikeClick(track) },
+                onCommentsClick = { onCommentsClick(track) },
+                onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(110.dp))
+        }
+    }
+}
+
+@Composable
+fun EmptyLibraryTracksCard(
+    text: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.82f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(vertical = 28.dp, horizontal = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "♪",
+            color = TrackHubGoldLight,
+            fontSize = 42.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = text,
+            color = TrackHubText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "Когда здесь появятся треки, они будут отображаться списком.",
+            color = TrackHubMutedText,
+            fontSize = 13.sp,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -3325,179 +3532,445 @@ fun PlaylistsScreen(
 
     val currentPlaylist = selectedPlaylist
 
-    if (currentPlaylist != null) {
-        BackHandler {
-            selectedPlaylist = null
-            playlistTracks = emptyList()
-            loadPlaylists()
-        }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        GoldBackgroundDecorations()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-        ) {
-            TextButton(
-                onClick = {
-                    selectedPlaylist = null
-                    playlistTracks = emptyList()
-                    loadPlaylists()
-                }
-            ) {
-                Text("← Назад к плейлистам")
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = currentPlaylist.name,
-                style = MaterialTheme.typography.headlineSmall
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (isLoading) {
-                CircularProgressIndicator()
-            }
-
-            if (playlistTracks.isEmpty() && !isLoading) {
-                Text("В этом плейлисте пока нет треков")
+        if (currentPlaylist != null) {
+            BackHandler {
+                selectedPlaylist = null
+                playlistTracks = emptyList()
+                loadPlaylists()
             }
 
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 18.dp)
+                    .padding(top = 44.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                item {
+                    TrackHubBackTextButton(
+                        text = "← Назад к плейлистам",
+                        onClick = {
+                            selectedPlaylist = null
+                            playlistTracks = emptyList()
+                            loadPlaylists()
+                        }
+                    )
+                }
+
+                item {
+                    Column {
+                        Text(
+                            text = currentPlaylist.name,
+                            color = TrackHubText,
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "Треков в плейлисте: ${playlistTracks.size}",
+                            color = TrackHubMutedText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                if (isLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(80.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = TrackHubGoldLight
+                            )
+                        }
+                    }
+                }
+
+                errorText?.let {
+                    item {
+                        TrackHubErrorText(it)
+                    }
+                }
+
+                if (playlistTracks.isEmpty() && !isLoading) {
+                    item {
+                        EmptyPlaylistCard(
+                            title = "В этом плейлисте пока нет треков",
+                            subtitle = "Добавьте треки через кнопку «В плейлист» на карточке трека."
+                        )
+                    }
+                }
+
                 items(playlistTracks) { track ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp)
-                        ) {
-                            Text(
-                                text = track.title,
-                                style = MaterialTheme.typography.titleMedium
-                            )
+                    PlaylistTrackCard(
+                        track = track
+                    )
+                }
 
-                            Text(
-                                text = track.author,
-                                style = MaterialTheme.typography.bodyMedium
+                item {
+                    Spacer(modifier = Modifier.height(110.dp))
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 18.dp)
+                    .padding(top = 44.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                item {
+                    TrackHubBackTextButton(
+                        text = "← Назад",
+                        onClick = onBack
+                    )
+                }
+
+                item {
+                    Text(
+                        text = "Мои плейлисты",
+                        color = TrackHubText,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(TrackHubSurface.copy(alpha = 0.82f))
+                            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = "Создать новый плейлист",
+                            color = TrackHubText,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        PlaylistNameField(
+                            value = playlistName,
+                            onValueChange = { playlistName = it }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        GoldSmallButton(
+                            text = "Создать",
+                            onClick = {
+                                val trimmedName = playlistName.trim()
+
+                                if (trimmedName.isBlank()) {
+                                    errorText = "Название плейлиста не должно быть пустым"
+                                    return@GoldSmallButton
+                                }
+
+                                scope.launch {
+                                    isLoading = true
+                                    errorText = null
+
+                                    try {
+                                        createPlaylist(trimmedName, accessToken)
+                                        playlistName = ""
+                                        playlists = fetchPlaylists(accessToken)
+                                    } catch (e: Exception) {
+                                        errorText = e.message ?: "Ошибка создания плейлиста"
+                                    } finally {
+                                        isLoading = false
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+
+                if (isLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(70.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = TrackHubGoldLight
                             )
                         }
                     }
                 }
-            }
-        }
-    } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-        ) {
-            TextButton(
-                onClick = onBack
-            ) {
-                Text("← Назад")
-            }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Мои плейлисты",
-                style = MaterialTheme.typography.headlineSmall
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedTextField(
-                value = playlistName,
-                onValueChange = { playlistName = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Название нового плейлиста") },
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    val trimmedName = playlistName.trim()
-
-                    if (trimmedName.isBlank()) {
-                        errorText = "Название плейлиста не должно быть пустым"
-                        return@Button
+                errorText?.let {
+                    item {
+                        TrackHubErrorText(it)
                     }
+                }
 
-                    scope.launch {
-                        isLoading = true
-                        errorText = null
+                item {
+                    Text(
+                        text = "Список плейлистов",
+                        color = TrackHubText,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-                        try {
-                            createPlaylist(trimmedName, accessToken)
-                            playlistName = ""
-                            playlists = fetchPlaylists(accessToken)
-                        } catch (e: Exception) {
-                            errorText = e.message ?: "Ошибка создания плейлиста"
-                        } finally {
-                            isLoading = false
-                        }
+                if (playlists.isEmpty() && !isLoading) {
+                    item {
+                        EmptyPlaylistCard(
+                            title = "Плейлистов пока нет",
+                            subtitle = "Создайте первый плейлист и добавьте туда свои треки."
+                        )
                     }
-                },
-                enabled = !isLoading
-            ) {
-                Text("Создать")
-            }
+                }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (isLoading) {
-                CircularProgressIndicator()
-            }
-
-            errorText?.let {
-                Text(
-                    text = "Ошибка: $it",
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
                 items(playlists) { playlist ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp)
-                        ) {
-                            Text(
-                                text = playlist.name,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-
-                            Text(
-                                text = "Треков: ${playlist.tracksCount}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Button(
-                                onClick = {
-                                    openPlaylist(playlist)
-                                }
-                            ) {
-                                Text("Открыть")
-                            }
+                    PlaylistCard(
+                        playlist = playlist,
+                        onClick = {
+                            openPlaylist(playlist)
                         }
-                    }
+                    )
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(110.dp))
                 }
             }
         }
     }
+}
+
+@Composable
+fun TrackHubBackTextButton(
+    text: String,
+    onClick: () -> Unit
+) {
+    Text(
+        text = text,
+        color = TrackHubGoldLight,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 2.dp)
+    )
+}
+
+@Composable
+fun PlaylistNameField(
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.70f))
+            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        LibraryCardIcon(iconText = "playlists")
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = TextStyle(
+                color = TrackHubText,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            cursorBrush = SolidColor(TrackHubGoldLight),
+            modifier = Modifier.weight(1f),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isBlank()) {
+                        Text(
+                            text = "Название плейлиста",
+                            color = TrackHubMutedText,
+                            fontSize = 16.sp
+                        )
+                    }
+
+                    innerTextField()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun PlaylistCard(
+    playlist: Playlist,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(86.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.84f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        LibraryCardIcon(iconText = "playlists")
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = playlist.name,
+                color = TrackHubText,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Треков: ${playlist.tracksCount}",
+                color = TrackHubMutedText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+
+        LibraryChevronIcon()
+    }
+}
+
+@Composable
+fun PlaylistTrackCard(
+    track: Track
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(74.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF111111).copy(alpha = 0.88f))
+            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TrackCoverPlaceholder(
+            track = track,
+            modifier = Modifier.size(54.dp)
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = track.title,
+                color = TrackHubText,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = track.author,
+                color = TrackHubMutedText,
+                fontSize = 14.sp,
+                maxLines = 1
+            )
+        }
+
+        Text(
+            text = "⋮",
+            color = TrackHubMutedText,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun EmptyPlaylistCard(
+    title: String,
+    subtitle: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.82f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(vertical = 28.dp, horizontal = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        LibraryCardIcon(iconText = "playlists")
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            text = title,
+            color = TrackHubText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = subtitle,
+            color = TrackHubMutedText,
+            fontSize = 13.sp,
+            lineHeight = 17.sp,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+fun TrackHubErrorText(
+    text: String
+) {
+    Text(
+        text = "Ошибка: $text",
+        color = Color(0xFFFF6B6B),
+        fontSize = 14.sp,
+        lineHeight = 18.sp
+    )
 }
 
 @Composable
