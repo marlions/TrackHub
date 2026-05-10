@@ -1,7 +1,7 @@
 package com.example.trackhub
 
 
-
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
@@ -1311,6 +1311,8 @@ fun CatalogScreen(
                             tracks = tracks,
                             isLoading = isLoading,
                             errorText = errorText,
+                            currentTrack = currentTrack,
+                            isPlaying = isPlaying,
                             onSearchClick = {
                                 loadTracks(searchQuery)
                             },
@@ -1319,7 +1321,11 @@ fun CatalogScreen(
                                 loadTracks()
                             },
                             onPlayClick = { track ->
-                                playTrack(track)
+                                if (currentTrack?.id == track.id) {
+                                    togglePlayPause()
+                                } else {
+                                    playTrack(track)
+                                }
                             },
                             onLikeClick = { track ->
                                 likeAndReload(track)
@@ -1957,6 +1963,8 @@ fun SearchTabScreen(
     tracks: List<Track>,
     isLoading: Boolean,
     errorText: String?,
+    currentTrack: Track?,
+    isPlaying: Boolean,
     onSearchClick: () -> Unit,
     onAllTracksClick: () -> Unit,
     onPlayClick: (Track) -> Unit,
@@ -1964,18 +1972,23 @@ fun SearchTabScreen(
     onCommentsClick: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit
 ) {
+    LaunchedEffect(searchQuery) {
+        delay(450)
+        onSearchClick()
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp)
-            .padding(top = 30.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(top = 48.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Text(
                 text = "Поиск",
                 color = TrackHubText,
-                fontSize = 34.sp,
+                fontSize = 30.sp,
                 fontWeight = FontWeight.ExtraBold
             )
         }
@@ -1989,13 +2002,10 @@ fun SearchTabScreen(
 
         item {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                GoldSmallButton(
-                    text = "Найти",
-                    onClick = onSearchClick
-                )
-
                 DarkSmallButton(
                     text = "Все треки",
                     onClick = onAllTracksClick
@@ -2003,24 +2013,53 @@ fun SearchTabScreen(
             }
         }
 
-        if (isLoading) {
-            item {
-                CircularProgressIndicator(color = TrackHubGoldLight)
-            }
-        }
-
         errorText?.let {
             item {
                 Text(
                     text = "Ошибка: $it",
-                    color = Color(0xFFFF6B6B)
+                    color = Color(0xFFFF6B6B),
+                    fontSize = 14.sp
+                )
+            }
+        }
+
+        item {
+            Text(
+                text = if (searchQuery.isBlank()) "Все треки" else "Результаты поиска",
+                color = TrackHubText,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        if (isLoading) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = TrackHubGoldLight
+                    )
+                }
+            }
+        }
+
+        if (tracks.isEmpty() && !isLoading && errorText == null) {
+            item {
+                EmptySearchResultCard(
+                    searchQuery = searchQuery
                 )
             }
         }
 
         items(tracks) { track ->
-            DarkTrackListCard(
+            SearchTrackResultCard(
                 track = track,
+                isCurrentTrack = currentTrack?.id == track.id,
+                isPlaying = currentTrack?.id == track.id && isPlaying,
                 onPlayClick = { onPlayClick(track) },
                 onLikeClick = { onLikeClick(track) },
                 onCommentsClick = { onCommentsClick(track) },
@@ -2035,6 +2074,181 @@ fun SearchTabScreen(
 }
 
 @Composable
+fun SearchTrackResultCard(
+    track: Track,
+    isCurrentTrack: Boolean,
+    isPlaying: Boolean,
+    onPlayClick: () -> Unit,
+    onLikeClick: () -> Unit,
+    onCommentsClick: () -> Unit,
+    onAddToPlaylistClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF111111).copy(alpha = 0.90f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onPlayClick),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TrackCoverPlaceholder(
+                track = track,
+                modifier = Modifier.size(58.dp)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = track.title,
+                    color = TrackHubText,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Text(
+                    text = track.author,
+                    color = TrackHubMutedText,
+                    fontSize = 14.sp,
+                    maxLines = 1
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "Лайков: ${track.likesCount} · Комментариев: ${track.commentsCount}",
+                    color = TrackHubMutedText.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                    maxLines = 1
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .border(1.dp, TrackHubGoldLight, CircleShape)
+                    .clickable(onClick = onPlayClick),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isCurrentTrack && isPlaying) {
+                    PauseGoldIcon()
+                } else {
+                    PlayGoldIcon()
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SearchActionButton(
+                text = "Лайк",
+                onClick = onLikeClick,
+                modifier = Modifier.weight(1f)
+            )
+
+            SearchActionButton(
+                text = "Комментарии",
+                onClick = onCommentsClick,
+                modifier = Modifier.weight(1.45f)
+            )
+
+            SearchActionButton(
+                text = "В плейлист",
+                onClick = onAddToPlaylistClick,
+                modifier = Modifier.weight(1.35f)
+            )
+        }
+    }
+}
+
+@Composable
+fun SearchActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.42f))
+            .border(1.dp, Color(0x44FFC84D), RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = TrackHubText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+fun EmptySearchResultCard(
+    searchQuery: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.80f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(vertical = 28.dp, horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        TrackHubPngIcon(
+            drawableId = R.drawable.search_icon,
+            size = 42.dp,
+            color = TrackHubGoldLight,
+            contentDescription = null
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            text = "Треки не найдены",
+            color = TrackHubText,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = if (searchQuery.isBlank()) {
+                "Пока нет доступных треков"
+            } else {
+                "Попробуйте изменить поисковый запрос"
+            },
+            color = TrackHubMutedText,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
 fun LibraryTabScreen(
     tracks: List<Track>,
     onPlaylistsClick: () -> Unit,
@@ -2044,14 +2258,14 @@ fun LibraryTabScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp)
-            .padding(top = 30.dp),
+            .padding(top = 48.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Text(
                 text = "Моя медиатека",
                 color = TrackHubText,
-                fontSize = 34.sp,
+                fontSize = 30.sp,
                 fontWeight = FontWeight.ExtraBold
             )
         }
@@ -2060,7 +2274,7 @@ fun LibraryTabScreen(
             LibraryActionCard(
                 title = "Мои плейлисты",
                 subtitle = "Открыть созданные плейлисты",
-                iconText = "▤",
+                iconText = "playlists",
                 onClick = onPlaylistsClick
             )
         }
@@ -2069,7 +2283,7 @@ fun LibraryTabScreen(
             LibraryActionCard(
                 title = "Любимые треки",
                 subtitle = "Треков с лайками: ${tracks.count { it.likesCount > 0 }}",
-                iconText = "♡",
+                iconText = "likes",
                 onClick = onLikedTracksClick
             )
         }
@@ -2078,7 +2292,7 @@ fun LibraryTabScreen(
             LibraryActionCard(
                 title = "Все треки",
                 subtitle = "Всего треков: ${tracks.size}",
-                iconText = "♪",
+                iconText = "tracks",
                 onClick = {}
             )
         }
@@ -2224,53 +2438,164 @@ fun LibraryActionCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(88.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(TrackHubSurface.copy(alpha = 0.80f))
+            .background(TrackHubSurface.copy(alpha = 0.82f))
             .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(54.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(TrackHubGold.copy(alpha = 0.18f))
-                .border(1.dp, TrackHubGoldLight, RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = iconText,
-                color = TrackHubGoldLight,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        LibraryCardIcon(iconText = iconText)
 
-        Spacer(modifier = Modifier.width(14.dp))
+        Spacer(modifier = Modifier.width(16.dp))
 
         Column(
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
         ) {
             Text(
                 text = title,
                 color = TrackHubText,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 19.sp,
+                lineHeight = 21.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
             )
+
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = subtitle,
                 color = TrackHubMutedText,
-                fontSize = 14.sp
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
             )
         }
 
-        Text(
-            text = "›",
-            color = TrackHubGoldLight,
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold
+        Spacer(modifier = Modifier.width(10.dp))
+
+        LibraryChevronIcon()
+    }
+}
+
+@Composable
+fun LibraryCardIcon(
+    iconText: String
+) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(TrackHubGold.copy(alpha = 0.12f))
+            .border(1.3.dp, TrackHubGoldLight, RoundedCornerShape(16.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        when (iconText) {
+            "playlists", "▤" -> {
+                Canvas(modifier = Modifier.size(28.dp)) {
+                    val color = TrackHubGoldLight
+                    val stroke = 2.2f
+                    val w = size.width
+                    val h = size.height
+
+                    drawLine(
+                        color = color,
+                        start = Offset(w * 0.18f, h * 0.25f),
+                        end = Offset(w * 0.82f, h * 0.25f),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+
+                    drawLine(
+                        color = color,
+                        start = Offset(w * 0.18f, h * 0.50f),
+                        end = Offset(w * 0.82f, h * 0.50f),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+
+                    drawLine(
+                        color = color,
+                        start = Offset(w * 0.18f, h * 0.75f),
+                        end = Offset(w * 0.82f, h * 0.75f),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+
+                    drawLine(
+                        color = color,
+                        start = Offset(w * 0.18f, h * 0.14f),
+                        end = Offset(w * 0.18f, h * 0.86f),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+
+            "likes", "♡" -> {
+                TrackHubPngIcon(
+                    drawableId = R.drawable.heart_icon,
+                    size = 34.dp,
+                    color = null,
+                    contentDescription = "Любимые треки"
+                )
+            }
+
+            "tracks", "♪" -> {
+                Text(
+                    text = "♪",
+                    color = TrackHubGoldLight,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            "+" -> {
+                Text(
+                    text = "+",
+                    color = TrackHubGoldLight,
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Light
+                )
+            }
+
+            else -> {
+                Text(
+                    text = iconText,
+                    color = TrackHubGoldLight,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LibraryChevronIcon() {
+    Canvas(
+        modifier = Modifier.size(20.dp)
+    ) {
+        val color = TrackHubGoldLight
+        val stroke = 2.6f
+
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.35f, size.height * 0.22f),
+            end = Offset(size.width * 0.68f, size.height * 0.50f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.35f, size.height * 0.78f),
+            end = Offset(size.width * 0.68f, size.height * 0.50f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
         )
     }
 }
@@ -2296,35 +2621,51 @@ fun TrackHubSearchField(
     value: String,
     onValueChange: (String) -> Unit
 ) {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF080808))
-            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+            .height(58.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color.Black.copy(alpha = 0.72f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
             .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.CenterStart
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        TrackHubPngIcon(
+            drawableId = R.drawable.search_icon,
+            size = 24.dp,
+            color = TrackHubGoldLight,
+            contentDescription = "Поиск"
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
             textStyle = TextStyle(
                 color = TrackHubText,
-                fontSize = 17.sp
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium
             ),
             cursorBrush = SolidColor(TrackHubGoldLight),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.weight(1f),
             decorationBox = { innerTextField ->
-                if (value.isBlank()) {
-                    Text(
-                        text = "Поиск трека",
-                        color = TrackHubMutedText,
-                        fontSize = 17.sp
-                    )
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isBlank()) {
+                        Text(
+                            text = "Поиск трека",
+                            color = TrackHubMutedText,
+                            fontSize = 18.sp
+                        )
+                    }
+
+                    innerTextField()
                 }
-                innerTextField()
             }
         )
     }
@@ -2457,7 +2798,7 @@ fun PlayGoldIcon() {
     Canvas(
         modifier = Modifier
             .size(20.dp)
-            .offset(x = 1.dp) // чуть вправо, чтобы визуально была по центру
+            .offset(x = 1.dp)
     ) {
         val playPath = Path().apply {
             moveTo(size.width * 0.20f, size.height * 0.12f)
@@ -2502,7 +2843,11 @@ fun BottomNavIcon(
     tab: MainTab,
     selected: Boolean
 ) {
-    val color = if (selected) TrackHubGoldLight else TrackHubMutedText
+    val iconColor = if (selected) {
+        TrackHubGoldLight
+    } else {
+        TrackHubMutedText
+    }
 
     val icon = when (tab) {
         MainTab.HOME -> R.drawable.home_icon
@@ -2521,7 +2866,7 @@ fun BottomNavIcon(
     TrackHubPngIcon(
         drawableId = icon,
         size = size,
-        color = null,
+        color = iconColor,
         contentDescription = null
     )
 }
