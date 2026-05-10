@@ -1,6 +1,20 @@
 package com.example.trackhub
 
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandHorizontally
+import kotlinx.coroutines.delay
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -88,7 +102,6 @@ import com.example.trackhub.ui.theme.TrackHubTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.DataOutputStream
@@ -119,7 +132,11 @@ data class Track(
     val author: String,
     val streamUrl: String,
     val likesCount: Int,
-    val commentsCount: Int
+    val commentsCount: Int,
+    val createdAt: String,
+    val fileSizeBytes: Long,
+    val durationSeconds: Int,
+    val playCount: Int
 )
 
 data class TrackComment(
@@ -133,6 +150,12 @@ data class Playlist(
     val id: Int,
     val name: String,
     val tracksCount: Int
+)
+
+data class UserProfile(
+    val id: Int,
+    val username: String,
+    val email: String
 )
 
 enum class MainTab {
@@ -1098,11 +1121,16 @@ fun CatalogScreen(
     var isPlaying by remember { mutableStateOf(false) }
     var currentPositionMs by remember { mutableStateOf(0L) }
     var durationMs by remember { mutableStateOf(0L) }
+    var playerVolume by remember { mutableStateOf(1f) }
+    var showFullPlayerScreen by remember { mutableStateOf(false) }
 
     var selectedTrackForComments by remember { mutableStateOf<Track?>(null) }
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
+    var selectedTrackMenu by remember { mutableStateOf<Track?>(null) }
+    var selectedTrackInfo by remember { mutableStateOf<Track?>(null) }
     var showPlaylistsScreen by remember { mutableStateOf(false) }
     var showUploadTrackScreen by remember { mutableStateOf(false) }
+    var showProfileScreen by remember { mutableStateOf(false) }
 
     val player = remember {
         ExoPlayer.Builder(context).build()
@@ -1129,6 +1157,24 @@ fun CatalogScreen(
         }
     }
 
+    fun refreshTracksSilently(query: String = searchQuery) {
+        scope.launch {
+            try {
+                delay(900)
+                val freshTracks = fetchTracks(query)
+                tracks = freshTracks
+
+                currentTrack?.let { playingTrack ->
+                    freshTracks.firstOrNull { it.id == playingTrack.id }?.let { updatedTrack ->
+                        currentTrack = updatedTrack
+                    }
+                }
+            } catch (_: Exception) {
+                // Тихое обновление не должно ломать интерфейс, если сервер временно недоступен.
+            }
+        }
+    }
+
     fun playTrack(track: Track) {
         val fullStreamUrl = if (track.streamUrl.startsWith("http")) {
             track.streamUrl
@@ -1146,6 +1192,8 @@ fun CatalogScreen(
         currentPositionMs = 0L
         durationMs = 0L
         isPlaying = true
+
+        refreshTracksSilently()
     }
 
     fun togglePlayPause() {
@@ -1160,15 +1208,56 @@ fun CatalogScreen(
         }
     }
 
+    fun playAdjacentTrack(direction: Int) {
+        if (tracks.isEmpty()) return
+
+        val currentId = currentTrack?.id
+        val currentIndex = tracks.indexOfFirst { it.id == currentId }
+        val safeIndex = if (currentIndex >= 0) currentIndex else 0
+        val nextIndex = (safeIndex + direction + tracks.size) % tracks.size
+
+        playTrack(tracks[nextIndex])
+    }
+
     fun likeAndReload(track: Track) {
         scope.launch {
             errorText = null
 
             try {
                 likeTrack(track.id, accessToken)
-                loadTracks(searchQuery)
+
+                val freshTracks = fetchTracks(searchQuery)
+                tracks = freshTracks
+
+                currentTrack?.let { playingTrack ->
+                    freshTracks.firstOrNull { it.id == playingTrack.id }?.let { updatedTrack ->
+                        currentTrack = updatedTrack
+                    }
+                }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка лайка"
+            }
+        }
+    }
+
+    fun deleteTrackAndReload(track: Track) {
+        scope.launch {
+            errorText = null
+
+            try {
+                deleteTrack(track.id, accessToken)
+
+                if (currentTrack?.id == track.id) {
+                    player.stop()
+                    currentTrack = null
+                    isPlaying = false
+                    currentPositionMs = 0L
+                    durationMs = 0L
+                }
+
+                loadTracks(searchQuery)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка удаления трека"
             }
         }
     }
@@ -1272,6 +1361,72 @@ fun CatalogScreen(
         return
     }
 
+    if (showProfileScreen) {
+        BackHandler {
+            showProfileScreen = false
+        }
+
+        ProfileScreen(
+            accessToken = accessToken,
+            tracksCount = tracks.size,
+            likedTracksCount = tracks.count { it.likesCount > 0 },
+            onBack = {
+                showProfileScreen = false
+            },
+            onLogout = {
+                player.pause()
+                showProfileScreen = false
+                onLogout()
+            }
+        )
+        return
+    }
+
+    if (showFullPlayerScreen && currentTrack != null) {
+        val track = currentTrack!!
+
+        TrackHubFullPlayerScreen(
+            track = track,
+            isPlaying = isPlaying,
+            currentPositionMs = currentPositionMs,
+            durationMs = durationMs,
+            volume = playerVolume,
+            isLiked = track.likesCount > 0,
+            onBack = {
+                showFullPlayerScreen = false
+            },
+            onLikeClick = {
+                likeAndReload(track)
+            },
+            onSeekTo = { positionMs ->
+                val targetPosition = if (durationMs > 0L) {
+                    positionMs.coerceIn(0L, durationMs)
+                } else {
+                    positionMs.coerceAtLeast(0L)
+                }
+
+                player.seekTo(targetPosition)
+                currentPositionMs = targetPosition
+            },
+            onVolumeChange = { newVolume ->
+                val safeVolume = newVolume.coerceIn(0f, 1f)
+
+                playerVolume = safeVolume
+                player.volume = safeVolume
+            },
+            onPlayPauseClick = {
+                togglePlayPause()
+            },
+            onPreviousClick = {
+                playAdjacentTrack(-1)
+            },
+            onNextClick = {
+                playAdjacentTrack(1)
+            }
+        )
+        return
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1298,9 +1453,15 @@ fun CatalogScreen(
                             tracks = tracks,
                             isLoading = isLoading,
                             errorText = errorText,
+                            onRetry = {
+                                loadTracks(searchQuery)
+                            },
+                            onShowAllClick = {
+                                currentTab = MainTab.LIBRARY
+                                libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
+                            },
                             onLogout = {
-                                player.pause()
-                                onLogout()
+                                showProfileScreen = true
                             },
                             onPlayClick = { track ->
                                 playTrack(track)
@@ -1313,6 +1474,9 @@ fun CatalogScreen(
                             },
                             onAddToPlaylistClick = { track ->
                                 selectedTrackForPlaylist = track
+                            },
+                            onMoreClick = { track ->
+                                selectedTrackMenu = track
                             }
                         )
                     }
@@ -1348,6 +1512,9 @@ fun CatalogScreen(
                             },
                             onAddToPlaylistClick = { track ->
                                 selectedTrackForPlaylist = track
+                            },
+                            onMoreClick = { track ->
+                                selectedTrackMenu = track
                             }
                         )
                     }
@@ -1404,6 +1571,9 @@ fun CatalogScreen(
                                     },
                                     onAddToPlaylistClick = { track ->
                                         selectedTrackForPlaylist = track
+                                    },
+                                    onMoreClick = { track ->
+                                        selectedTrackMenu = track
                                     }
                                 )
                             }
@@ -1434,6 +1604,9 @@ fun CatalogScreen(
                                     },
                                     onAddToPlaylistClick = { track ->
                                         selectedTrackForPlaylist = track
+                                    },
+                                    onMoreClick = { track ->
+                                        selectedTrackMenu = track
                                     }
                                 )
                             }
@@ -1458,6 +1631,26 @@ fun CatalogScreen(
                     isPlaying = isPlaying,
                     currentPositionMs = currentPositionMs,
                     durationMs = durationMs,
+                    volume = playerVolume,
+                    onSeekTo = { positionMs ->
+                        val targetPosition = if (durationMs > 0L) {
+                            positionMs.coerceIn(0L, durationMs)
+                        } else {
+                            positionMs.coerceAtLeast(0L)
+                        }
+
+                        player.seekTo(targetPosition)
+                        currentPositionMs = targetPosition
+                    },
+                    onVolumeChange = { newVolume ->
+                        val safeVolume = newVolume.coerceIn(0f, 1f)
+
+                        playerVolume = safeVolume
+                        player.volume = safeVolume
+                    },
+                    onOpenPlayerClick = {
+                        showFullPlayerScreen = true
+                    },
                     onPlayPauseClick = {
                         togglePlayPause()
                     }
@@ -1475,8 +1668,341 @@ fun CatalogScreen(
                 }
             )
         }
+        selectedTrackMenu?.let { track ->
+            TrackOptionsDialog(
+                track = track,
+                onDismiss = {
+                    selectedTrackMenu = null
+                },
+                onInfoClick = {
+                    selectedTrackMenu = null
+                    selectedTrackInfo = track
+                },
+                onCommentsClick = {
+                    selectedTrackMenu = null
+                    selectedTrackForComments = track
+                },
+                onAddToPlaylistClick = {
+                    selectedTrackMenu = null
+                    selectedTrackForPlaylist = track
+                },
+                onDeleteTrackClick = {
+                    selectedTrackMenu = null
+                    deleteTrackAndReload(track)
+                }
+            )
+        }
+
+        selectedTrackInfo?.let { track ->
+            TrackInfoDialog(
+                track = track,
+                onDismiss = {
+                    selectedTrackInfo = null
+                }
+            )
+        }
     }
 
+}
+
+@Composable
+fun TrackOptionsDotsButton(
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "⋮",
+            color = TrackHubMutedText,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun TrackOptionsDialog(
+    track: Track,
+    onDismiss: () -> Unit,
+    onInfoClick: () -> Unit,
+    onCommentsClick: () -> Unit,
+    onAddToPlaylistClick: () -> Unit,
+    onDeleteTrackClick: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0B0B0C))
+                .border(1.dp, TrackHubBorder, RoundedCornerShape(24.dp))
+                .padding(18.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TrackCoverPlaceholder(
+                    track = track,
+                    modifier = Modifier.size(58.dp)
+                )
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = track.title,
+                        color = TrackHubText,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2
+                    )
+
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    Text(
+                        text = track.author,
+                        color = TrackHubGoldLight,
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            TrackMenuActionButton(
+                text = "Информация о треке",
+                danger = false,
+                onClick = onInfoClick
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TrackMenuActionButton(
+                text = "Комментарии",
+                danger = false,
+                onClick = onCommentsClick
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TrackMenuActionButton(
+                text = "Добавить в плейлист",
+                danger = false,
+                onClick = onAddToPlaylistClick
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TrackMenuActionButton(
+                text = "Удалить трек",
+                danger = true,
+                onClick = onDeleteTrackClick
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TrackMenuActionButton(
+                text = "Отмена",
+                danger = false,
+                onClick = onDismiss
+            )
+        }
+    }
+}
+
+@Composable
+fun TrackMenuActionButton(
+    text: String,
+    danger: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (danger) {
+                    Color(0xFF2A0808).copy(alpha = 0.90f)
+                } else {
+                    Color.Black.copy(alpha = 0.55f)
+                }
+            )
+            .border(
+                width = 1.dp,
+                color = if (danger) Color(0x66FF6B6B) else TrackHubBorder,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (danger) Color(0xFFFF6B6B) else TrackHubText,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun TrackInfoDialog(
+    track: Track,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0B0B0C))
+                .border(1.dp, TrackHubBorder, RoundedCornerShape(24.dp))
+                .padding(18.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TrackCoverPlaceholder(
+                    track = track,
+                    modifier = Modifier.size(60.dp)
+                )
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "Информация о треке",
+                        color = TrackHubText,
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = track.title,
+                        color = TrackHubGoldLight,
+                        fontSize = 15.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            TrackInfoRow(label = "Название", value = track.title)
+            TrackInfoRow(label = "Автор", value = track.author)
+            TrackInfoRow(label = "Дата загрузки", value = formatTrackDate(track.createdAt))
+            TrackInfoRow(label = "Длительность", value = formatDurationSeconds(track.durationSeconds))
+            TrackInfoRow(label = "Размер файла", value = formatFileSize(track.fileSizeBytes))
+            TrackInfoRow(label = "Прослушиваний", value = track.playCount.toString())
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            TrackMenuActionButton(
+                text = "Закрыть",
+                danger = false,
+                onClick = onDismiss
+            )
+        }
+    }
+}
+
+@Composable
+fun TrackInfoRow(
+    label: String,
+    value: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 7.dp)
+    ) {
+        Text(
+            text = label,
+            color = TrackHubMutedText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = value,
+            color = TrackHubText,
+            fontSize = 15.sp,
+            lineHeight = 19.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+
+        Spacer(modifier = Modifier.height(7.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(TrackHubBorder.copy(alpha = 0.55f))
+        )
+    }
+}
+
+fun formatTrackDate(createdAt: String): String {
+    if (createdAt.isBlank()) {
+        return "Неизвестно"
+    }
+
+    return createdAt
+        .take(16)
+        .replace("T", " ")
+}
+
+fun formatDurationSeconds(seconds: Int): String {
+    if (seconds <= 0) {
+        return "Неизвестно"
+    }
+
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val secs = seconds % 60
+
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, secs)
+    } else {
+        "%d:%02d".format(minutes, secs)
+    }
+}
+
+fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0L) {
+        return "Неизвестно"
+    }
+
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+
+    return if (mb >= 1.0) {
+        "%.1f MB".format(mb)
+    } else {
+        "%.0f KB".format(kb)
+    }
 }
 
 @Composable
@@ -1484,11 +2010,14 @@ fun HomeTabScreen(
     tracks: List<Track>,
     isLoading: Boolean,
     errorText: String?,
+    onRetry: () -> Unit,
+    onShowAllClick: () -> Unit,
     onLogout: () -> Unit,
     onPlayClick: (Track) -> Unit,
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
-    onAddToPlaylistClick: (Track) -> Unit
+    onAddToPlaylistClick: (Track) -> Unit,
+    onMoreClick: (Track) -> Unit
 ) {
     val likedTracks = tracks
         .filter { it.likesCount > 0 }
@@ -1532,10 +2061,9 @@ fun HomeTabScreen(
 
         errorText?.let {
             item {
-                Text(
-                    text = "Ошибка: $it",
-                    color = Color(0xFFFF6B6B),
-                    fontSize = 14.sp
+                BackendErrorCard(
+                    text = it,
+                    onRetry = onRetry
                 )
             }
         }
@@ -1553,15 +2081,348 @@ fun HomeTabScreen(
         item {
             RecentlyAddedSection(
                 tracks = recentTracks,
+                onShowAllClick = onShowAllClick,
                 onPlayClick = onPlayClick,
                 onLikeClick = onLikeClick,
                 onCommentsClick = onCommentsClick,
-                onAddToPlaylistClick = onAddToPlaylistClick
+                onAddToPlaylistClick = onAddToPlaylistClick,
+                onMoreClick = onMoreClick
             )
         }
 
         item {
             Spacer(modifier = Modifier.height(110.dp))
+        }
+    }
+}
+
+@Composable
+fun ProfileScreen(
+    accessToken: String,
+    tracksCount: Int,
+    likedTracksCount: Int,
+    onBack: () -> Unit,
+    onLogout: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    var userProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var playlistsCount by remember { mutableStateOf<Int?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    fun loadProfileInfo() {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                userProfile = fetchCurrentUser(accessToken)
+                playlistsCount = fetchPlaylists(accessToken).size
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки профиля"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadProfileInfo()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        GoldBackgroundDecorations()
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp)
+                .padding(top = 44.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                TrackHubBackTextButton(
+                    text = "← Назад",
+                    onClick = onBack
+                )
+            }
+
+            item {
+                Text(
+                    text = "Профиль",
+                    color = TrackHubText,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(TrackHubSurface.copy(alpha = 0.84f))
+                        .border(1.dp, TrackHubBorder, RoundedCornerShape(24.dp))
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    TrackHubPngIcon(
+                        drawableId = R.drawable.profile_icon,
+                        size = 78.dp,
+                        color = null,
+                        contentDescription = "Профиль"
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = userProfile?.username ?: "TrackHub",
+                        color = TrackHubText,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = userProfile?.email ?: "Активный пользователь",
+                        color = TrackHubMutedText,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+
+                    if (isLoading) {
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        CircularProgressIndicator(
+                            color = TrackHubGoldLight,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+
+                    errorText?.let {
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Text(
+                            text = "Не удалось загрузить данные профиля",
+                            color = Color(0xFFFF6B6B),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        TrackHubGoldLight.copy(alpha = 0.45f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    ProfileStatsGrid(
+                        tracksCount = tracksCount,
+                        likedTracksCount = likedTracksCount,
+                        playlistsCount = playlistsCount
+                    )
+                }
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(TrackHubSurface.copy(alpha = 0.82f))
+                        .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Аккаунт",
+                        color = TrackHubText,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF2A0808).copy(alpha = 0.86f))
+                            .border(1.dp, Color(0x66FF6B6B), RoundedCornerShape(18.dp))
+                            .clickable(onClick = onLogout),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Выйти из аккаунта",
+                            color = Color(0xFFFF6B6B),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileStatsGrid(
+    tracksCount: Int,
+    likedTracksCount: Int,
+    playlistsCount: Int?
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            ProfileStatCard(
+                title = "Треки",
+                value = tracksCount.toString(),
+                modifier = Modifier.weight(1f)
+            )
+
+            ProfileStatCard(
+                title = "Лайки",
+                value = likedTracksCount.toString(),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        ProfileStatCard(
+            title = "Плейлисты",
+            value = playlistsCount?.toString() ?: "—",
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun ProfileStatCard(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .height(78.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.48f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            color = TrackHubGoldLight,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        Text(
+            text = title,
+            color = TrackHubMutedText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+fun BackendErrorCard(
+    text: String,
+    onRetry: (() -> Unit)? = null
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF2A0808).copy(alpha = 0.86f))
+            .border(1.dp, Color(0x66FF6B6B), RoundedCornerShape(20.dp))
+            .padding(18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Сервер недоступен",
+            color = Color(0xFFFF6B6B),
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Проверьте, что backend запущен, база данных работает, а адрес API указан правильно.",
+            color = TrackHubText.copy(alpha = 0.88f),
+            fontSize = 14.sp,
+            lineHeight = 19.sp,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = text,
+            color = TrackHubMutedText,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+            textAlign = TextAlign.Center
+        )
+
+        if (onRetry != null) {
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Box(
+                modifier = Modifier
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(TrackHubGold.copy(alpha = 0.95f))
+                    .clickable(onClick = onRetry)
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Повторить",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -1638,10 +2499,12 @@ fun LikedTracksSection(
 @Composable
 fun RecentlyAddedSection(
     tracks: List<Track>,
+    onShowAllClick: () -> Unit,
     onPlayClick: (Track) -> Unit,
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
-    onAddToPlaylistClick: (Track) -> Unit
+    onAddToPlaylistClick: (Track) -> Unit,
+    onMoreClick: (Track) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -1672,7 +2535,11 @@ fun RecentlyAddedSection(
                 text = "Показать все ›",
                 color = TrackHubGoldLight,
                 fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onShowAllClick)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             )
         }
 
@@ -1687,7 +2554,8 @@ fun RecentlyAddedSection(
                 tracks.take(4).forEach { track ->
                     RecentlyAddedWideTrackCard(
                         track = track,
-                        onPlayClick = { onPlayClick(track) }
+                        onPlayClick = { onPlayClick(track) },
+                        onMoreClick = { onMoreClick(track) }
                     )
                 }
             }
@@ -1792,7 +2660,8 @@ fun RecentTrackCard(
 @Composable
 fun RecentlyAddedWideTrackCard(
     track: Track,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    onMoreClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1833,13 +2702,20 @@ fun RecentlyAddedWideTrackCard(
             )
         }
 
-        Text(
-            text = "⋮",
-            color = TrackHubMutedText,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 8.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onMoreClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "⋮",
+                color = TrackHubMutedText,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
@@ -1875,17 +2751,530 @@ fun TrackCoverPlaceholder(
 }
 
 @Composable
+fun TrackHubFullPlayerScreen(
+    track: Track,
+    isPlaying: Boolean,
+    currentPositionMs: Long,
+    durationMs: Long,
+    volume: Float,
+    isLiked: Boolean,
+    onBack: () -> Unit,
+    onLikeClick: () -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    onPlayPauseClick: () -> Unit,
+    onPreviousClick: () -> Unit,
+    onNextClick: () -> Unit
+) {
+    val safeDurationMs = durationMs.coerceAtLeast(1L)
+
+    var isSeeking by remember(track.id) { mutableStateOf(false) }
+    var sliderPosition by remember(track.id) { mutableStateOf(0f) }
+    var showVolumeSlider by remember(track.id) { mutableStateOf(true) }
+    var showTrackInfo by remember(track.id) { mutableStateOf(false) }
+
+    BackHandler {
+        onBack()
+    }
+
+    LaunchedEffect(currentPositionMs, durationMs, isSeeking) {
+        if (!isSeeking) {
+            sliderPosition = currentPositionMs
+                .coerceIn(0L, safeDurationMs)
+                .toFloat()
+        }
+    }
+
+    LaunchedEffect(showVolumeSlider, volume) {
+        if (showVolumeSlider) {
+            delay(3000)
+            showVolumeSlider = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF270500),
+                        Color(0xFF130101),
+                        Color.Black
+                    )
+                )
+            )
+    ) {
+        GoldBackgroundDecorations()
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp)
+                .padding(top = 42.dp, bottom = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onBack),
+                    contentAlignment = Alignment.Center
+                ) {
+                    FullPlayerDownIcon()
+                }
+
+                Text(
+                    text = "СЕЙЧАС ИГРАЕТ",
+                    color = TrackHubText.copy(alpha = 0.90f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            showTrackInfo = true
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "⋮",
+                        color = TrackHubText,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(44.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+                    .shadow(
+                        elevation = 22.dp,
+                        shape = RoundedCornerShape(22.dp),
+                        ambientColor = TrackHubGold.copy(alpha = 0.12f),
+                        spotColor = TrackHubGold.copy(alpha = 0.16f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                TrackCoverPlaceholder(
+                    track = track,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = track.title,
+                        color = TrackHubText,
+                        fontSize = 28.sp,
+                        lineHeight = 32.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 2
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = track.author,
+                        color = TrackHubMutedText,
+                        fontSize = 18.sp,
+                        lineHeight = 22.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+
+                FullPlayerHeartButton(
+                    isLiked = isLiked,
+                    onClick = onLikeClick
+                )
+            }
+
+            Spacer(modifier = Modifier.height(26.dp))
+
+            TrackHubCompactSlider(
+                value = sliderPosition.coerceIn(0f, safeDurationMs.toFloat()),
+                onValueChange = { value ->
+                    isSeeking = true
+                    sliderPosition = value.coerceIn(0f, safeDurationMs.toFloat())
+                },
+                onValueChangeFinished = {
+                    onSeekTo(sliderPosition.toLong())
+                    isSeeking = false
+                },
+                valueRange = 0f..safeDurationMs.toFloat(),
+                enabled = durationMs > 0L,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(18.dp),
+                trackHeight = 4.dp,
+                thumbRadius = 6.dp
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = formatTrackTime(sliderPosition.toLong()),
+                    color = TrackHubMutedText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Text(
+                    text = if (durationMs > 0L) formatTrackTime(durationMs) else "--:--",
+                    color = TrackHubMutedText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FullPlayerSmallControlButton(
+                    onClick = onPreviousClick
+                ) {
+                    PreviousTrackIcon()
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(78.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .clickable(onClick = onPlayPauseClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isPlaying) {
+                        FullPlayerPauseIcon()
+                    } else {
+                        FullPlayerPlayIcon()
+                    }
+                }
+
+                FullPlayerSmallControlButton(
+                    onClick = onNextClick
+                ) {
+                    NextTrackIcon()
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.22f))
+                        .border(1.dp, TrackHubGold.copy(alpha = 0.70f), CircleShape)
+                        .clickable {
+                            showVolumeSlider = !showVolumeSlider
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    MiniVolumeIcon(
+                        isMuted = volume <= 0.01f,
+                        color = TrackHubText.copy(alpha = 0.92f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                AnimatedVisibility(visible = showVolumeSlider) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        TrackHubCompactSlider(
+                            value = volume.coerceIn(0f, 1f),
+                            onValueChange = { newVolume ->
+                                onVolumeChange(newVolume.coerceIn(0f, 1f))
+                            },
+                            valueRange = 0f..1f,
+                            enabled = true,
+                            modifier = Modifier
+                                .width(230.dp)
+                                .height(18.dp),
+                            trackHeight = 4.dp,
+                            thumbRadius = 6.dp
+                        )
+                    }
+                }
+            }
+        }
+
+        if (showTrackInfo) {
+            TrackInfoDialog(
+                track = track,
+                onDismiss = {
+                    showTrackInfo = false
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun FullPlayerHeartButton(
+    isLiked: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.24f))
+            .border(
+                width = 1.dp,
+                color = if (isLiked) TrackHubGoldLight else Color.White.copy(alpha = 0.72f),
+                shape = CircleShape
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        FullPlayerHeartIcon(
+            isLiked = isLiked,
+            modifier = Modifier.size(26.dp)
+        )
+    }
+}
+
+@Composable
+fun FullPlayerHeartIcon(
+    isLiked: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val heartPath = Path().apply {
+            moveTo(w * 0.50f, h * 0.88f)
+            cubicTo(w * 0.20f, h * 0.66f, w * 0.05f, h * 0.48f, w * 0.10f, h * 0.28f)
+            cubicTo(w * 0.15f, h * 0.08f, w * 0.38f, h * 0.05f, w * 0.50f, h * 0.24f)
+            cubicTo(w * 0.62f, h * 0.05f, w * 0.85f, h * 0.08f, w * 0.90f, h * 0.28f)
+            cubicTo(w * 0.95f, h * 0.48f, w * 0.80f, h * 0.66f, w * 0.50f, h * 0.88f)
+            close()
+        }
+
+        if (isLiked) {
+            drawPath(
+                path = heartPath,
+                color = TrackHubGoldLight
+            )
+        } else {
+            drawPath(
+                path = heartPath,
+                color = Color.White,
+                style = Stroke(
+                    width = w * 0.095f,
+                    cap = StrokeCap.Round
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun FullPlayerSmallControlButton(
+    onClick: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun FullPlayerDownIcon() {
+    Canvas(modifier = Modifier.size(30.dp)) {
+        val stroke = 4.0f
+        val color = Color.White
+
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.18f, size.height * 0.36f),
+            end = Offset(size.width * 0.50f, size.height * 0.68f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.82f, size.height * 0.36f),
+            end = Offset(size.width * 0.50f, size.height * 0.68f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun PreviousTrackIcon() {
+    Canvas(modifier = Modifier.size(36.dp)) {
+        val color = Color.White
+        val lineWidth = size.width * 0.09f
+
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.20f, size.height * 0.20f),
+            end = Offset(size.width * 0.20f, size.height * 0.80f),
+            strokeWidth = lineWidth,
+            cap = StrokeCap.Round
+        )
+
+        val path = Path().apply {
+            moveTo(size.width * 0.78f, size.height * 0.18f)
+            lineTo(size.width * 0.28f, size.height * 0.50f)
+            lineTo(size.width * 0.78f, size.height * 0.82f)
+            close()
+        }
+
+        drawPath(path = path, color = color)
+    }
+}
+
+@Composable
+fun NextTrackIcon() {
+    Canvas(modifier = Modifier.size(36.dp)) {
+        val color = Color.White
+        val lineWidth = size.width * 0.09f
+
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.80f, size.height * 0.20f),
+            end = Offset(size.width * 0.80f, size.height * 0.80f),
+            strokeWidth = lineWidth,
+            cap = StrokeCap.Round
+        )
+
+        val path = Path().apply {
+            moveTo(size.width * 0.22f, size.height * 0.18f)
+            lineTo(size.width * 0.72f, size.height * 0.50f)
+            lineTo(size.width * 0.22f, size.height * 0.82f)
+            close()
+        }
+
+        drawPath(path = path, color = color)
+    }
+}
+
+@Composable
+fun FullPlayerPlayIcon() {
+    Canvas(
+        modifier = Modifier
+            .size(34.dp)
+            .offset(x = 2.dp)
+    ) {
+        val path = Path().apply {
+            moveTo(size.width * 0.22f, size.height * 0.12f)
+            lineTo(size.width * 0.22f, size.height * 0.88f)
+            lineTo(size.width * 0.86f, size.height * 0.50f)
+            close()
+        }
+
+        drawPath(path = path, color = Color.Black)
+    }
+}
+
+@Composable
+fun FullPlayerPauseIcon() {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .width(8.dp)
+                .height(34.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.Black)
+        )
+
+        Box(
+            modifier = Modifier
+                .width(8.dp)
+                .height(34.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.Black)
+        )
+    }
+}
+
+@Composable
 fun TrackHubMiniPlayer(
     track: Track,
     isPlaying: Boolean,
     currentPositionMs: Long,
     durationMs: Long,
+    volume: Float,
+    onSeekTo: (Long) -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    onOpenPlayerClick: () -> Unit,
     onPlayPauseClick: () -> Unit
 ) {
-    val progress = if (durationMs > 0L) {
-        (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-    } else {
-        0f
+    val safeDurationMs = durationMs.coerceAtLeast(1L)
+
+    var isSeeking by remember(track.id) { mutableStateOf(false) }
+    var sliderPosition by remember(track.id) { mutableStateOf(0f) }
+    var showVolumeSlider by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentPositionMs, durationMs, isSeeking) {
+        if (!isSeeking) {
+            sliderPosition = currentPositionMs
+                .coerceIn(0L, safeDurationMs)
+                .toFloat()
+        }
+    }
+
+    LaunchedEffect(showVolumeSlider, volume) {
+        if (showVolumeSlider) {
+            delay(3000)
+            showVolumeSlider = false
+        }
     }
 
     Column(
@@ -1909,31 +3298,87 @@ fun TrackHubMiniPlayer(
         Row(
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TrackCoverPlaceholder(
-                track = track,
-                modifier = Modifier.size(54.dp)
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(
-                modifier = Modifier.weight(1f)
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onOpenPlayerClick),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = track.title,
-                    color = TrackHubText,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1
+                TrackCoverPlaceholder(
+                    track = track,
+                    modifier = Modifier.size(54.dp)
                 )
 
-                Text(
-                    text = track.author,
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = track.title,
+                        color = TrackHubText,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+
+                    Text(
+                        text = track.author,
+                        color = TrackHubGoldLight,
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            AnimatedVisibility(
+                visible = showVolumeSlider,
+                enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
+                exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.End)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TrackHubCompactSlider(
+                        value = volume.coerceIn(0f, 1f),
+                        onValueChange = { newVolume ->
+                            onVolumeChange(newVolume.coerceIn(0f, 1f))
+                        },
+                        valueRange = 0f..1f,
+                        enabled = true,
+                        modifier = Modifier
+                            .width(92.dp)
+                            .height(22.dp),
+                        trackHeight = 3.dp,
+                        thumbRadius = 5.dp
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.26f))
+                    .border(1.dp, TrackHubGold.copy(alpha = 0.62f), CircleShape)
+                    .clickable {
+                        showVolumeSlider = !showVolumeSlider
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                MiniVolumeIcon(
+                    isMuted = volume <= 0.01f,
                     color = TrackHubGoldLight,
-                    fontSize = 14.sp,
-                    maxLines = 1
+                    modifier = Modifier.size(19.dp)
                 )
             }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             Box(
                 modifier = Modifier
@@ -1954,18 +3399,227 @@ fun TrackHubMiniPlayer(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.White.copy(alpha = 0.18f))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
+                modifier = Modifier.width(42.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = formatTrackTime(sliderPosition.toLong()),
+                    color = TrackHubMutedText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            TrackHubCompactSlider(
+                value = sliderPosition.coerceIn(0f, safeDurationMs.toFloat()),
+                onValueChange = { value ->
+                    isSeeking = true
+                    sliderPosition = value.coerceIn(0f, safeDurationMs.toFloat())
+                },
+                onValueChangeFinished = {
+                    onSeekTo(sliderPosition.toLong())
+                    isSeeking = false
+                },
+                valueRange = 0f..safeDurationMs.toFloat(),
+                enabled = durationMs > 0L,
                 modifier = Modifier
-                    .fillMaxWidth(progress)
-                    .fillMaxHeight()
-                    .background(TrackHubGoldLight)
+                    .weight(1f)
+                    .height(14.dp),
+                trackHeight = 4.dp,
+                thumbRadius = 5.dp
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Box(
+                modifier = Modifier.width(42.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (durationMs > 0L) formatTrackTime(durationMs) else "--:--",
+                    color = TrackHubMutedText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun TrackHubCompactSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    trackHeight: Dp = 4.dp,
+    thumbRadius: Dp = 5.dp,
+    onValueChangeFinished: (() -> Unit)? = null
+) {
+    val density = LocalDensity.current
+    var widthPx by remember { mutableStateOf(1) }
+
+    val minValue = valueRange.start
+    val maxValue = valueRange.endInclusive
+    val safeMax = if (maxValue > minValue) maxValue else minValue + 1f
+    val safeValue = value.coerceIn(minValue, safeMax)
+
+    fun valueFromOffset(x: Float): Float {
+        val fraction = (x / widthPx.toFloat()).coerceIn(0f, 1f)
+        return minValue + (safeMax - minValue) * fraction
+    }
+
+    Box(
+        modifier = modifier
+            .onSizeChanged { size ->
+                widthPx = size.width.coerceAtLeast(1)
+            }
+            .pointerInput(enabled, minValue, safeMax, widthPx) {
+                if (!enabled) {
+                    return@pointerInput
+                }
+
+                detectTapGestures { offset ->
+                    onValueChange(valueFromOffset(offset.x))
+                    onValueChangeFinished?.invoke()
+                }
+            }
+            .pointerInput(enabled, minValue, safeMax, widthPx) {
+                if (!enabled) {
+                    return@pointerInput
+                }
+
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        onValueChange(valueFromOffset(offset.x))
+                    },
+                    onDrag = { change, _ ->
+                        onValueChange(valueFromOffset(change.position.x))
+                    },
+                    onDragEnd = {
+                        onValueChangeFinished?.invoke()
+                    },
+                    onDragCancel = {
+                        onValueChangeFinished?.invoke()
+                    }
+                )
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val trackHeightPx = trackHeight.toPx()
+            val thumbRadiusPx = thumbRadius.toPx()
+            val centerY = size.height / 2f
+            val progressFraction = ((safeValue - minValue) / (safeMax - minValue)).coerceIn(0f, 1f)
+            val progressWidth = size.width * progressFraction
+            val inactiveColor = if (enabled) {
+                Color.White.copy(alpha = 0.18f)
+            } else {
+                Color.White.copy(alpha = 0.10f)
+            }
+            val activeColor = if (enabled) {
+                TrackHubGoldLight
+            } else {
+                TrackHubMutedText.copy(alpha = 0.50f)
+            }
+
+            drawRoundRect(
+                color = inactiveColor,
+                topLeft = Offset(0f, centerY - trackHeightPx / 2f),
+                size = Size(size.width, trackHeightPx),
+                cornerRadius = CornerRadius(trackHeightPx / 2f, trackHeightPx / 2f)
+            )
+
+            drawRoundRect(
+                color = activeColor,
+                topLeft = Offset(0f, centerY - trackHeightPx / 2f),
+                size = Size(progressWidth, trackHeightPx),
+                cornerRadius = CornerRadius(trackHeightPx / 2f, trackHeightPx / 2f)
+            )
+
+            if (enabled) {
+                drawCircle(
+                    color = TrackHubGoldLight,
+                    radius = thumbRadiusPx,
+                    center = Offset(progressWidth.coerceIn(thumbRadiusPx, size.width - thumbRadiusPx), centerY)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MiniVolumeIcon(
+    isMuted: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.105f
+
+        val speakerPath = Path().apply {
+            moveTo(w * 0.10f, h * 0.38f)
+            lineTo(w * 0.28f, h * 0.38f)
+            lineTo(w * 0.52f, h * 0.18f)
+            lineTo(w * 0.52f, h * 0.82f)
+            lineTo(w * 0.28f, h * 0.62f)
+            lineTo(w * 0.10f, h * 0.62f)
+            close()
+        }
+
+        drawPath(
+            path = speakerPath,
+            color = color
+        )
+
+        if (isMuted) {
+            drawLine(
+                color = color,
+                start = Offset(w * 0.68f, h * 0.34f),
+                end = Offset(w * 0.92f, h * 0.66f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(w * 0.92f, h * 0.34f),
+                end = Offset(w * 0.68f, h * 0.66f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        } else {
+            drawArc(
+                color = color,
+                startAngle = -38f,
+                sweepAngle = 76f,
+                useCenter = false,
+                topLeft = Offset(w * 0.48f, h * 0.30f),
+                size = Size(w * 0.34f, h * 0.40f),
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+
+            drawArc(
+                color = color.copy(alpha = 0.75f),
+                startAngle = -42f,
+                sweepAngle = 84f,
+                useCenter = false,
+                topLeft = Offset(w * 0.54f, h * 0.18f),
+                size = Size(w * 0.48f, h * 0.64f),
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
             )
         }
     }
@@ -2063,9 +3717,14 @@ fun SearchTabScreen(
     onPlayClick: (Track) -> Unit,
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
-    onAddToPlaylistClick: (Track) -> Unit
+    onAddToPlaylistClick: (Track) -> Unit,
+    onMoreClick: (Track) -> Unit
 ) {
     LaunchedEffect(searchQuery) {
+        if (searchQuery.isBlank()) {
+            return@LaunchedEffect
+        }
+
         delay(450)
         onSearchClick()
     }
@@ -2108,10 +3767,9 @@ fun SearchTabScreen(
 
         errorText?.let {
             item {
-                Text(
-                    text = "Ошибка: $it",
-                    color = Color(0xFFFF6B6B),
-                    fontSize = 14.sp
+                BackendErrorCard(
+                    text = it,
+                    onRetry = onSearchClick
                 )
             }
         }
@@ -2125,7 +3783,7 @@ fun SearchTabScreen(
             )
         }
 
-        if (isLoading) {
+        if (isLoading && tracks.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier
@@ -2156,7 +3814,8 @@ fun SearchTabScreen(
                 onPlayClick = { onPlayClick(track) },
                 onLikeClick = { onLikeClick(track) },
                 onCommentsClick = { onCommentsClick(track) },
-                onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                onAddToPlaylistClick = { onAddToPlaylistClick(track) },
+                onMoreClick = { onMoreClick(track) }
             )
         }
 
@@ -2174,7 +3833,8 @@ fun SearchTrackResultCard(
     onPlayClick: () -> Unit,
     onLikeClick: () -> Unit,
     onCommentsClick: () -> Unit,
-    onAddToPlaylistClick: () -> Unit
+    onAddToPlaylistClick: () -> Unit,
+    onMoreClick: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -2241,6 +3901,14 @@ fun SearchTrackResultCard(
                 } else {
                     PlayGoldIcon()
                 }
+            }
+
+            if (onMoreClick != null) {
+                Spacer(modifier = Modifier.width(6.dp))
+
+                TrackOptionsDotsButton(
+                    onClick = onMoreClick
+                )
             }
         }
 
@@ -2409,7 +4077,8 @@ fun LibraryTracksListScreen(
     onPlayClick: (Track) -> Unit,
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
-    onAddToPlaylistClick: (Track) -> Unit
+    onAddToPlaylistClick: (Track) -> Unit,
+    onMoreClick: (Track) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -2468,7 +4137,8 @@ fun LibraryTracksListScreen(
                 onPlayClick = { onPlayClick(track) },
                 onLikeClick = { onLikeClick(track) },
                 onCommentsClick = { onCommentsClick(track) },
-                onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                onAddToPlaylistClick = { onAddToPlaylistClick(track) },
+                onMoreClick = { onMoreClick(track) }
             )
         }
 
@@ -4411,6 +6081,7 @@ fun PlaylistsScreen(
     var selectedPlaylist by remember { mutableStateOf<Playlist?>(null) }
     var playlistTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var playlistName by remember { mutableStateOf("") }
+    var selectedPlaylistTrackMenu by remember { mutableStateOf<Track?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
@@ -4439,6 +6110,30 @@ fun PlaylistsScreen(
                 playlistTracks = fetchPlaylistTracks(playlist.id, accessToken)
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки треков плейлиста"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun removeTrackFromCurrentPlaylist(track: Track) {
+        val playlist = selectedPlaylist ?: return
+
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                removeTrackFromPlaylist(
+                    playlistId = playlist.id,
+                    trackId = track.id,
+                    accessToken = accessToken
+                )
+
+                playlistTracks = fetchPlaylistTracks(playlist.id, accessToken)
+                playlists = fetchPlaylists(accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка удаления трека из плейлиста"
             } finally {
                 isLoading = false
             }
@@ -4531,7 +6226,10 @@ fun PlaylistsScreen(
 
                 items(playlistTracks) { track ->
                     PlaylistTrackCard(
-                        track = track
+                        track = track,
+                        onMoreClick = {
+                            selectedPlaylistTrackMenu = track
+                        }
                     )
                 }
 
@@ -4669,6 +6367,19 @@ fun PlaylistsScreen(
                     Spacer(modifier = Modifier.height(110.dp))
                 }
             }
+        }
+
+        selectedPlaylistTrackMenu?.let { track ->
+            RemoveFromPlaylistDialog(
+                track = track,
+                onDismiss = {
+                    selectedPlaylistTrackMenu = null
+                },
+                onRemoveClick = {
+                    selectedPlaylistTrackMenu = null
+                    removeTrackFromCurrentPlaylist(track)
+                }
+            )
         }
     }
 }
@@ -4876,7 +6587,8 @@ fun OpenPlaylistHeader(
 
 @Composable
 fun PlaylistTrackCard(
-    track: Track
+    track: Track,
+    onMoreClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -4920,20 +6632,84 @@ fun PlaylistTrackCard(
             )
         }
 
-        Box(
+        TrackOptionsDotsButton(
+            onClick = onMoreClick
+        )
+    }
+}
+
+@Composable
+fun RemoveFromPlaylistDialog(
+    track: Track,
+    onDismiss: () -> Unit,
+    onRemoveClick: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .clickable {
-                    // позже сюда можно добавить меню трека
-                },
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0B0B0C))
+                .border(1.dp, TrackHubBorder, RoundedCornerShape(24.dp))
+                .padding(18.dp)
         ) {
             Text(
-                text = "⋮",
-                color = TrackHubMutedText,
-                fontSize = 24.sp,
+                text = "Трек в плейлисте",
+                color = TrackHubText,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TrackCoverPlaceholder(
+                    track = track,
+                    modifier = Modifier.size(58.dp)
+                )
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = track.title,
+                        color = TrackHubText,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2
+                    )
+
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    Text(
+                        text = track.author,
+                        color = TrackHubGoldLight,
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            TrackMenuActionButton(
+                text = "Удалить из плейлиста",
+                danger = true,
+                onClick = onRemoveClick
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TrackMenuActionButton(
+                text = "Отмена",
+                danger = false,
+                onClick = onDismiss
             )
         }
     }
@@ -5186,6 +6962,40 @@ suspend fun registerUser(
     return authRequest("/api/auth/register", body)
 }
 
+suspend fun fetchCurrentUser(
+    accessToken: String
+): UserProfile {
+    return withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/auth/me")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val item = JSONObject(responseText)
+
+            UserProfile(
+                id = item.getInt("id"),
+                username = item.getString("username"),
+                email = item.getString("email")
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
 suspend fun authRequest(
     path: String,
     body: JSONObject
@@ -5259,7 +7069,11 @@ suspend fun fetchTracks(query: String): List<Track> {
                         author = item.getString("author"),
                         streamUrl = item.getString("stream_url"),
                         likesCount = item.optInt("likes_count", 0),
-                        commentsCount = item.optInt("comments_count", 0)
+                        commentsCount = item.optInt("comments_count", 0),
+                        createdAt = item.optString("created_at", ""),
+                        fileSizeBytes = item.optLong("file_size_bytes", 0L),
+                        durationSeconds = item.optInt("duration_seconds", 0),
+                        playCount = item.optInt("play_count", 0)
                     )
                 )
             }
@@ -5493,6 +7307,61 @@ suspend fun addTrackToPlaylist(
     }
 }
 
+suspend fun deleteTrack(
+    trackId: Int,
+    accessToken: String
+) {
+    withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/tracks/$trackId")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "DELETE"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+
+            if (responseCode !in 200..299) {
+                val responseText = readResponseText(connection)
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun removeTrackFromPlaylist(
+    playlistId: Int,
+    trackId: Int,
+    accessToken: String
+) {
+    withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/playlists/$playlistId/tracks/$trackId")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "DELETE"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+
+            if (responseCode !in 200..299) {
+                val responseText = readResponseText(connection)
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
 suspend fun fetchPlaylistTracks(
     playlistId: Int,
     accessToken: String
@@ -5528,7 +7397,11 @@ suspend fun fetchPlaylistTracks(
                         author = item.getString("author"),
                         streamUrl = item.getString("stream_url"),
                         likesCount = item.optInt("likes_count", 0),
-                        commentsCount = item.optInt("comments_count", 0)
+                        commentsCount = item.optInt("comments_count", 0),
+                        createdAt = item.optString("created_at", ""),
+                        fileSizeBytes = item.optLong("file_size_bytes", 0L),
+                        durationSeconds = item.optInt("duration_seconds", 0),
+                        playCount = item.optInt("play_count", 0)
                     )
                 )
             }
@@ -5623,7 +7496,11 @@ suspend fun uploadTrack(
                 author = item.getString("author"),
                 streamUrl = item.getString("stream_url"),
                 likesCount = item.optInt("likes_count", 0),
-                commentsCount = item.optInt("comments_count", 0)
+                commentsCount = item.optInt("comments_count", 0),
+                createdAt = item.optString("created_at", ""),
+                fileSizeBytes = item.optLong("file_size_bytes", 0L),
+                durationSeconds = item.optInt("duration_seconds", 0),
+                playCount = item.optInt("play_count", 0)
             )
         } finally {
             connection.disconnect()
@@ -5657,6 +7534,14 @@ fun getFileName(
     }
 
     return "audio_${System.currentTimeMillis()}.mp3"
+}
+
+fun formatTrackTime(milliseconds: Long): String {
+    val totalSeconds = (milliseconds / 1000L).coerceAtLeast(0L)
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+
+    return "%d:%02d".format(minutes, seconds)
 }
 
 fun readResponseText(connection: HttpURLConnection): String {
