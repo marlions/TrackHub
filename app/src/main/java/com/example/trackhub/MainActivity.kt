@@ -4015,153 +4015,388 @@ fun AddToPlaylistScreen(
         loadPlaylists()
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .background(Color.Black)
     ) {
-        TextButton(
-            onClick = onBack
-        ) {
-            Text("← Назад")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "Добавить в плейлист",
-            style = MaterialTheme.typography.headlineSmall
-        )
-
-        Text(
-            text = "${track.title} — ${track.author}",
-            style = MaterialTheme.typography.bodyMedium
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = playlistName,
-            onValueChange = { playlistName = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Название нового плейлиста") },
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                val trimmedName = playlistName.trim()
-
-                if (trimmedName.isBlank()) {
-                    errorText = "Название плейлиста не должно быть пустым"
-                    return@Button
-                }
-
-                scope.launch {
-                    isLoading = true
-                    errorText = null
-                    successText = null
-
-                    try {
-                        createPlaylist(trimmedName, accessToken)
-                        playlistName = ""
-                        playlists = fetchPlaylists(accessToken)
-                        successText = "Плейлист создан"
-                    } catch (e: Exception) {
-                        errorText = e.message ?: "Ошибка создания плейлиста"
-                    } finally {
-                        isLoading = false
-                    }
-                }
-            },
-            enabled = !isLoading
-        ) {
-            Text("Создать плейлист")
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Мои плейлисты",
-            style = MaterialTheme.typography.titleLarge
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (isLoading) {
-            CircularProgressIndicator()
-        }
-
-        successText?.let {
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-
-        errorText?.let {
-            Text(
-                text = "Ошибка: $it",
-                color = MaterialTheme.colorScheme.error
-            )
-        }
+        GoldBackgroundDecorations()
 
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp)
+                .padding(top = 44.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(playlists) { playlist ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            item {
+                TrackHubBackTextButton(
+                    text = "← Назад",
+                    onClick = onBack
+                )
+            }
+
+            item {
+                Text(
+                    text = "Добавить в плейлист",
+                    color = TrackHubText,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            item {
+                AddToPlaylistTrackHeader(track = track)
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(TrackHubSurface.copy(alpha = 0.84f))
+                        .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+                        .padding(16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Text(
-                            text = playlist.name,
-                            style = MaterialTheme.typography.titleMedium
-                        )
+                    Text(
+                        text = "Создать новый плейлист",
+                        color = TrackHubText,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                        Text(
-                            text = "Треков: ${playlist.tracksCount}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                    PlaylistNameField(
+                        value = playlistName,
+                        onValueChange = {
+                            playlistName = it
+                            errorText = null
+                            successText = null
+                        }
+                    )
 
-                        Button(
-                            onClick = {
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    GoldSmallButton(
+                        text = "Создать плейлист",
+                        onClick = {
+                            val trimmedName = playlistName.trim()
+
+                            if (trimmedName.isBlank()) {
+                                errorText = "Название плейлиста не должно быть пустым"
+                            } else {
                                 scope.launch {
                                     isLoading = true
                                     errorText = null
                                     successText = null
 
                                     try {
-                                        addTrackToPlaylist(
-                                            playlistId = playlist.id,
-                                            trackId = track.id,
-                                            accessToken = accessToken
-                                        )
-
+                                        createPlaylist(trimmedName, accessToken)
+                                        playlistName = ""
                                         playlists = fetchPlaylists(accessToken)
-                                        successText = "Трек добавлен в плейлист"
+                                        successText = "Плейлист создан"
                                     } catch (e: Exception) {
-                                        errorText = e.message ?: "Ошибка добавления в плейлист"
+                                        errorText = e.message ?: "Ошибка создания плейлиста"
                                     } finally {
                                         isLoading = false
                                     }
                                 }
-                            },
-                            enabled = !isLoading
-                        ) {
-                            Text("Добавить")
+                            }
                         }
+                    )
+                }
+            }
+
+            if (isLoading) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(70.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = TrackHubGoldLight
+                        )
                     }
                 }
             }
+
+            successText?.let {
+                item {
+                    AddToPlaylistStatusCard(
+                        text = it,
+                        isError = false
+                    )
+                }
+            }
+
+            errorText?.let {
+                item {
+                    AddToPlaylistStatusCard(
+                        text = it,
+                        isError = true
+                    )
+                }
+            }
+
+            item {
+                Text(
+                    text = "Выберите плейлист",
+                    color = TrackHubText,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (playlists.isEmpty() && !isLoading) {
+                item {
+                    EmptyAddToPlaylistCard()
+                }
+            }
+
+            items(playlists) { playlist ->
+                AddToPlaylistCard(
+                    playlist = playlist,
+                    enabled = !isLoading,
+                    onAddClick = {
+                        scope.launch {
+                            isLoading = true
+                            errorText = null
+                            successText = null
+
+                            try {
+                                addTrackToPlaylist(
+                                    playlistId = playlist.id,
+                                    trackId = track.id,
+                                    accessToken = accessToken
+                                )
+
+                                playlists = fetchPlaylists(accessToken)
+                                successText = "Трек добавлен в плейлист «${playlist.name}»"
+                            } catch (e: Exception) {
+                                errorText = e.message ?: "Ошибка добавления в плейлист"
+                            } finally {
+                                isLoading = false
+                            }
+                        }
+                    }
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
         }
+    }
+}
+
+@Composable
+fun AddToPlaylistTrackHeader(
+    track: Track
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(TrackHubSurface.copy(alpha = 0.84f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TrackCoverPlaceholder(
+            track = track,
+            modifier = Modifier.size(62.dp)
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = track.title,
+                color = TrackHubText,
+                fontSize = 20.sp,
+                lineHeight = 23.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = track.author,
+                color = TrackHubGoldLight,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Выберите плейлист, куда добавить этот трек",
+                color = TrackHubMutedText,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun AddToPlaylistCard(
+    playlist: Playlist,
+    enabled: Boolean,
+    onAddClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(88.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.84f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        LibraryCardIcon(
+            iconText = "playlists",
+            boxSize = 48.dp,
+            iconSize = 24.dp,
+            cornerRadius = 14.dp
+        )
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = playlist.name,
+                color = TrackHubText,
+                fontSize = 18.sp,
+                lineHeight = 21.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Треков: ${playlist.tracksCount}",
+                color = TrackHubMutedText,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Box(
+            modifier = Modifier
+                .height(38.dp)
+                .clip(RoundedCornerShape(50))
+                .background(
+                    if (enabled) {
+                        TrackHubGold.copy(alpha = 0.95f)
+                    } else {
+                        Color(0xFF4E4E4E)
+                    }
+                )
+                .clickable(enabled = enabled, onClick = onAddClick)
+                .padding(horizontal = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Добавить",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun AddToPlaylistStatusCard(
+    text: String,
+    isError: Boolean
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (isError) {
+                    Color(0xFF2A0808).copy(alpha = 0.86f)
+                } else {
+                    TrackHubSurface.copy(alpha = 0.82f)
+                }
+            )
+            .border(
+                width = 1.dp,
+                color = if (isError) Color(0x66FF6B6B) else TrackHubBorder,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .padding(14.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = if (isError) "Ошибка: $text" else text,
+            color = if (isError) Color(0xFFFF6B6B) else TrackHubGoldLight,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+fun EmptyAddToPlaylistCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.82f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(vertical = 28.dp, horizontal = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        LibraryCardIcon(
+            iconText = "playlists",
+            boxSize = 52.dp,
+            iconSize = 26.dp,
+            cornerRadius = 15.dp
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            text = "Плейлистов пока нет",
+            color = TrackHubText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "Создайте новый плейлист выше, а потом добавьте в него этот трек.",
+            color = TrackHubMutedText,
+            fontSize = 13.sp,
+            lineHeight = 17.sp,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
