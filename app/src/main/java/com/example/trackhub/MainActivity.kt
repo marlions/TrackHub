@@ -1,6 +1,7 @@
 package com.example.trackhub
 
 
+
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
@@ -38,6 +39,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -1836,27 +1839,16 @@ fun TrackHubMiniPlayer(
             Box(
                 modifier = Modifier
                     .size(54.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .border(1.dp, TrackHubGoldLight, CircleShape)
                     .clickable(onClick = onPlayPauseClick),
                 contentAlignment = Alignment.Center
             ) {
                 if (isPlaying) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.45f))
-                            .border(1.dp, TrackHubGoldLight, RoundedCornerShape(50)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        PauseGoldIcon()
-                    }
+                    PauseGoldIcon()
                 } else {
-                    TrackHubPngIcon(
-                        drawableId = R.drawable.play_icon,
-                        size = 54.dp,
-                        color = null,
-                        contentDescription = "Play"
-                    )
+                    PlayGoldIcon()
                 }
             }
         }
@@ -2462,25 +2454,37 @@ fun ClockGoldIcon() {
 
 @Composable
 fun PlayGoldIcon() {
-    TrackHubPngIcon(
-        drawableId = R.drawable.play_icon,
-        size = 28.dp,
-        color = null,
-        contentDescription = "Play"
-    )
+    Canvas(
+        modifier = Modifier
+            .size(20.dp)
+            .offset(x = 1.dp) // чуть вправо, чтобы визуально была по центру
+    ) {
+        val playPath = Path().apply {
+            moveTo(size.width * 0.20f, size.height * 0.12f)
+            lineTo(size.width * 0.20f, size.height * 0.88f)
+            lineTo(size.width * 0.86f, size.height * 0.50f)
+            close()
+        }
+
+        drawPath(
+            path = playPath,
+            color = Color.White
+        )
+    }
 }
 
 @Composable
 fun PauseGoldIcon() {
     Row(
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
                 .width(6.dp)
                 .height(24.dp)
                 .clip(RoundedCornerShape(3.dp))
-                .background(TrackHubGoldLight)
+                .background(Color.White)
         )
 
         Box(
@@ -2488,7 +2492,7 @@ fun PauseGoldIcon() {
                 .width(6.dp)
                 .height(24.dp)
                 .clip(RoundedCornerShape(3.dp))
-                .background(TrackHubGoldLight)
+                .background(Color.White)
         )
     }
 }
