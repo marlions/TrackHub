@@ -158,6 +158,20 @@ data class UserProfile(
     val email: String
 )
 
+data class UserPublic(
+    val id: Int,
+    val username: String,
+    val isFollowing: Boolean,
+    val followersCount: Int,
+    val followingCount: Int
+)
+
+data class FollowUser(
+    val id: Int,
+    val username: String,
+    val followedAt: String
+)
+
 enum class MainTab {
     HOME,
     SEARCH,
@@ -1131,6 +1145,8 @@ fun CatalogScreen(
     var showPlaylistsScreen by remember { mutableStateOf(false) }
     var showUploadTrackScreen by remember { mutableStateOf(false) }
     var showProfileScreen by remember { mutableStateOf(false) }
+    var showUserSearchScreen by remember { mutableStateOf(false) }
+    var showFollowingScreen by remember { mutableStateOf(false) }
 
     val player = remember {
         ExoPlayer.Builder(context).build()
@@ -1361,6 +1377,34 @@ fun CatalogScreen(
         return
     }
 
+    if (showUserSearchScreen) {
+        BackHandler {
+            showUserSearchScreen = false
+        }
+
+        UserSearchScreen(
+            accessToken = accessToken,
+            onBack = {
+                showUserSearchScreen = false
+            }
+        )
+        return
+    }
+
+    if (showFollowingScreen) {
+        BackHandler {
+            showFollowingScreen = false
+        }
+
+        FollowingScreen(
+            accessToken = accessToken,
+            onBack = {
+                showFollowingScreen = false
+            }
+        )
+        return
+    }
+
     if (showProfileScreen) {
         BackHandler {
             showProfileScreen = false
@@ -1370,6 +1414,12 @@ fun CatalogScreen(
             accessToken = accessToken,
             tracksCount = tracks.size,
             likedTracksCount = tracks.count { it.likesCount > 0 },
+            onFindUsersClick = {
+                showUserSearchScreen = true
+            },
+            onFollowingClick = {
+                showFollowingScreen = true
+            },
             onBack = {
                 showProfileScreen = false
             },
@@ -2101,6 +2151,8 @@ fun ProfileScreen(
     accessToken: String,
     tracksCount: Int,
     likedTracksCount: Int,
+    onFindUsersClick: () -> Unit,
+    onFollowingClick: () -> Unit,
     onBack: () -> Unit,
     onLogout: () -> Unit
 ) {
@@ -2256,6 +2308,42 @@ fun ProfileScreen(
                         .padding(16.dp)
                 ) {
                     Text(
+                        text = "Пользователи",
+                        color = TrackHubText,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    ProfileActionRow(
+                        title = "Найти пользователей",
+                        subtitle = "Поиск пользователей по имени",
+                        iconText = "+",
+                        onClick = onFindUsersClick
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    ProfileActionRow(
+                        title = "Мои подписки",
+                        subtitle = "Пользователи, на которых вы подписаны",
+                        iconText = "playlists",
+                        onClick = onFollowingClick
+                    )
+                }
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(TrackHubSurface.copy(alpha = 0.82f))
+                        .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+                        .padding(16.dp)
+                ) {
+                    Text(
                         text = "Аккаунт",
                         color = TrackHubText,
                         fontSize = 20.sp,
@@ -2290,6 +2378,690 @@ fun ProfileScreen(
         }
     }
 }
+
+
+@Composable
+fun ProfileActionRow(
+    title: String,
+    subtitle: String,
+    iconText: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(74.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.48f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        LibraryCardIcon(
+            iconText = iconText,
+            boxSize = 42.dp,
+            iconSize = 21.dp,
+            cornerRadius = 12.dp
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = title,
+                color = TrackHubText,
+                fontSize = 17.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = subtitle,
+                color = TrackHubMutedText,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+
+        LibraryChevronIcon()
+    }
+}
+
+@Composable
+fun UserSearchScreen(
+    accessToken: String,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    var query by remember { mutableStateOf("") }
+    var users by remember { mutableStateOf<List<UserPublic>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    fun loadUsers(searchText: String = query) {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                users = searchUsers(
+                    accessToken = accessToken,
+                    query = searchText
+                )
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка поиска пользователей"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun toggleFollow(user: UserPublic) {
+        scope.launch {
+            errorText = null
+
+            try {
+                if (user.isFollowing) {
+                    unfollowUser(user.id, accessToken)
+                } else {
+                    followUser(user.id, accessToken)
+                }
+
+                users = searchUsers(
+                    accessToken = accessToken,
+                    query = query
+                )
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка изменения подписки"
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadUsers("")
+    }
+
+    LaunchedEffect(query) {
+        delay(350)
+        loadUsers(query)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        GoldBackgroundDecorations()
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp)
+                .padding(top = 44.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                TrackHubBackTextButton(
+                    text = "← Назад",
+                    onClick = onBack
+                )
+            }
+
+            item {
+                Text(
+                    text = "Найти пользователей",
+                    color = TrackHubText,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            item {
+                UserSearchField(
+                    value = query,
+                    onValueChange = {
+                        query = it
+                    }
+                )
+            }
+
+            errorText?.let {
+                item {
+                    BackendErrorCard(
+                        text = it,
+                        onRetry = {
+                            loadUsers(query)
+                        }
+                    )
+                }
+            }
+
+            if (isLoading && users.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = TrackHubGoldLight
+                        )
+                    }
+                }
+            }
+
+            if (users.isEmpty() && !isLoading && errorText == null) {
+                item {
+                    EmptyUsersCard(
+                        title = "Пользователи не найдены",
+                        subtitle = if (query.isBlank()) {
+                            "Пока нет других пользователей для подписки."
+                        } else {
+                            "Попробуйте изменить поисковый запрос."
+                        }
+                    )
+                }
+            }
+
+            items(users) { user ->
+                UserPublicCard(
+                    user = user,
+                    onFollowClick = {
+                        toggleFollow(user)
+                    }
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun FollowingScreen(
+    accessToken: String,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+
+    var following by remember { mutableStateOf<List<FollowUser>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+
+    fun loadFollowing() {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                following = fetchMyFollowing(accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки подписок"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun unfollowAndReload(user: FollowUser) {
+        scope.launch {
+            errorText = null
+
+            try {
+                unfollowUser(user.id, accessToken)
+                following = fetchMyFollowing(accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка отписки"
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadFollowing()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        GoldBackgroundDecorations()
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp)
+                .padding(top = 44.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                TrackHubBackTextButton(
+                    text = "← Назад",
+                    onClick = onBack
+                )
+            }
+
+            item {
+                Text(
+                    text = "Мои подписки",
+                    color = TrackHubText,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            item {
+                Text(
+                    text = "Пользователи, на которых вы подписаны",
+                    color = TrackHubMutedText,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            errorText?.let {
+                item {
+                    BackendErrorCard(
+                        text = it,
+                        onRetry = {
+                            loadFollowing()
+                        }
+                    )
+                }
+            }
+
+            if (isLoading && following.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = TrackHubGoldLight
+                        )
+                    }
+                }
+            }
+
+            if (following.isEmpty() && !isLoading && errorText == null) {
+                item {
+                    EmptyUsersCard(
+                        title = "Подписок пока нет",
+                        subtitle = "Откройте поиск пользователей и подпишитесь на интересных авторов."
+                    )
+                }
+            }
+
+            items(following) { user ->
+                FollowingUserCard(
+                    user = user,
+                    onUnfollowClick = {
+                        unfollowAndReload(user)
+                    }
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun UserSearchField(
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(58.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color.Black.copy(alpha = 0.72f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MiniUserSearchIcon()
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = TextStyle(
+                color = TrackHubText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            cursorBrush = SolidColor(TrackHubGoldLight),
+            modifier = Modifier.weight(1f),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isBlank()) {
+                        Text(
+                            text = "Поиск по имени",
+                            color = TrackHubMutedText,
+                            fontSize = 18.sp
+                        )
+                    }
+
+                    innerTextField()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun UserPublicCard(
+    user: UserPublic,
+    onFollowClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(88.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.84f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        UserAvatarIcon(
+            size = 48.dp
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = user.username,
+                color = TrackHubText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Подписчики: ${user.followersCount}",
+                color = TrackHubMutedText,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(1.dp))
+
+            Text(
+                text = "Подписки: ${user.followingCount}",
+                color = TrackHubMutedText,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        FollowButton(
+            isFollowing = user.isFollowing,
+            onClick = onFollowClick
+        )
+    }
+}
+
+@Composable
+fun FollowingUserCard(
+    user: FollowUser,
+    onUnfollowClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(88.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.84f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        UserAvatarIcon(
+            size = 48.dp
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = user.username,
+                color = TrackHubText,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = if (user.followedAt.isBlank()) {
+                    "Вы подписаны на пользователя"
+                } else {
+                    "Подписка с ${formatTrackDate(user.followedAt)}"
+                },
+                color = TrackHubMutedText,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Box(
+            modifier = Modifier
+                .height(38.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFF2A0808).copy(alpha = 0.90f))
+                .border(1.dp, Color(0x66FF6B6B), RoundedCornerShape(50))
+                .clickable(onClick = onUnfollowClick)
+                .padding(horizontal = 13.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Отписаться",
+                color = Color(0xFFFF6B6B),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun FollowButton(
+    isFollowing: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (isFollowing) {
+                    Color.Black.copy(alpha = 0.55f)
+                } else {
+                    TrackHubGold.copy(alpha = 0.95f)
+                }
+            )
+            .border(
+                width = 1.dp,
+                color = if (isFollowing) TrackHubBorder else TrackHubGoldLight,
+                shape = RoundedCornerShape(50)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = if (isFollowing) "Отписаться" else "Подписаться",
+            color = if (isFollowing) TrackHubText else Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+fun EmptyUsersCard(
+    title: String,
+    subtitle: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.82f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(vertical = 28.dp, horizontal = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        UserAvatarIcon(
+            size = 54.dp
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            text = title,
+            color = TrackHubText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = subtitle,
+            color = TrackHubMutedText,
+            fontSize = 13.sp,
+            lineHeight = 17.sp,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+fun UserAvatarIcon(
+    size: Dp
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(TrackHubGold.copy(alpha = 0.12f))
+            .border(1.dp, TrackHubGoldLight, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        MiniUserSearchIcon(
+            modifier = Modifier.size(size * 0.46f)
+        )
+    }
+}
+
+@Composable
+fun MiniUserSearchIcon(
+    modifier: Modifier = Modifier.size(24.dp)
+) {
+    Canvas(modifier = modifier) {
+        val stroke = size.width * 0.09f
+        val w = size.width
+        val h = size.height
+
+        drawCircle(
+            color = TrackHubGoldLight,
+            radius = w * 0.16f,
+            center = Offset(w * 0.42f, h * 0.30f),
+            style = Stroke(width = stroke)
+        )
+
+        val bodyPath = Path().apply {
+            moveTo(w * 0.16f, h * 0.76f)
+            cubicTo(
+                w * 0.16f,
+                h * 0.57f,
+                w * 0.30f,
+                h * 0.50f,
+                w * 0.42f,
+                h * 0.50f
+            )
+            cubicTo(
+                w * 0.54f,
+                h * 0.50f,
+                w * 0.68f,
+                h * 0.57f,
+                w * 0.68f,
+                h * 0.76f
+            )
+        }
+
+        drawPath(
+            path = bodyPath,
+            color = TrackHubGoldLight,
+            style = Stroke(
+                width = stroke,
+                cap = StrokeCap.Round
+            )
+        )
+
+        drawCircle(
+            color = TrackHubGoldLight,
+            radius = w * 0.14f,
+            center = Offset(w * 0.76f, h * 0.72f),
+            style = Stroke(width = stroke * 0.80f)
+        )
+
+        drawLine(
+            color = TrackHubGoldLight,
+            start = Offset(w * 0.86f, h * 0.82f),
+            end = Offset(w * 0.98f, h * 0.94f),
+            strokeWidth = stroke * 0.80f,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
 
 @Composable
 fun ProfileStatsGrid(
@@ -7412,6 +8184,152 @@ suspend fun fetchPlaylistTracks(
         }
     }
 }
+
+
+suspend fun searchUsers(
+    accessToken: String,
+    query: String
+): List<UserPublic> {
+    return withContext(Dispatchers.IO) {
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        val url = URL("$BASE_URL/api/users/search?query=$encodedQuery")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val jsonArray = JSONArray(responseText)
+            val result = mutableListOf<UserPublic>()
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+
+                result.add(
+                    UserPublic(
+                        id = item.getInt("id"),
+                        username = item.getString("username"),
+                        isFollowing = item.optBoolean("is_following", false),
+                        followersCount = item.optInt("followers_count", 0),
+                        followingCount = item.optInt("following_count", 0)
+                    )
+                )
+            }
+
+            result
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun fetchMyFollowing(
+    accessToken: String
+): List<FollowUser> {
+    return withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/users/me/following")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val jsonArray = JSONArray(responseText)
+            val result = mutableListOf<FollowUser>()
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+
+                result.add(
+                    FollowUser(
+                        id = item.getInt("id"),
+                        username = item.getString("username"),
+                        followedAt = item.optString("followed_at", "")
+                    )
+                )
+            }
+
+            result
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun followUser(
+    userId: Int,
+    accessToken: String
+) {
+    withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/users/$userId/follow")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+
+            if (responseCode !in 200..299) {
+                val responseText = readResponseText(connection)
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun unfollowUser(
+    userId: Int,
+    accessToken: String
+) {
+    withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/users/$userId/follow")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "DELETE"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+
+            if (responseCode !in 200..299) {
+                val responseText = readResponseText(connection)
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
 
 suspend fun uploadTrack(
     context: Context,
