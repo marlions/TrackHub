@@ -144,6 +144,7 @@ enum class MainTab {
 
 enum class LibraryInnerScreen {
     MAIN,
+    PLAYLISTS,
     LIKED_TRACKS,
     ALL_TRACKS
 }
@@ -1357,13 +1358,22 @@ fun CatalogScreen(
                                 LibraryTabScreen(
                                     tracks = tracks,
                                     onPlaylistsClick = {
-                                        showPlaylistsScreen = true
+                                        libraryInnerScreen = LibraryInnerScreen.PLAYLISTS
                                     },
                                     onLikedTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.LIKED_TRACKS
                                     },
                                     onAllTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
+                                    }
+                                )
+                            }
+
+                            LibraryInnerScreen.PLAYLISTS -> {
+                                PlaylistsScreen(
+                                    accessToken = accessToken,
+                                    onBack = {
+                                        libraryInnerScreen = LibraryInnerScreen.MAIN
                                     }
                                 )
                             }
@@ -1432,14 +1442,13 @@ fun CatalogScreen(
 
                     MainTab.CREATE -> {
                         CreateTabScreen(
-                            onUploadTrackClick = {
-                                showUploadTrackScreen = true
-                            },
-                            onCreatePlaylistClick = {
-                                showPlaylistsScreen = true
+                            accessToken = accessToken,
+                            onUploadSuccess = {
+                                loadTracks(searchQuery)
                             }
                         )
                     }
+
                 }
             }
 
@@ -2512,45 +2521,423 @@ fun EmptyLibraryTracksCard(
 
 @Composable
 fun CreateTabScreen(
-    onUploadTrackClick: () -> Unit,
-    onCreatePlaylistClick: () -> Unit
+    accessToken: String,
+    onUploadSuccess: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var title by remember { mutableStateOf("") }
+    var author by remember { mutableStateOf("") }
+    var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedFileName by remember { mutableStateOf<String?>(null) }
+
+    var isLoading by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    var successText by remember { mutableStateOf<String?>(null) }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        selectedFileUri = uri
+        selectedFileName = uri?.let { getFileName(context, it) }
+        errorText = null
+        successText = null
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp)
-            .padding(top = 30.dp),
+            .padding(top = 48.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Text(
                 text = "Создать",
                 color = TrackHubText,
-                fontSize = 34.sp,
+                fontSize = 30.sp,
                 fontWeight = FontWeight.ExtraBold
             )
         }
 
         item {
-            LibraryActionCard(
-                title = "Загрузить трек",
-                subtitle = "Добавить новый MP3-файл в TrackHub",
-                iconText = "+",
-                onClick = onUploadTrackClick
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(TrackHubSurface.copy(alpha = 0.84f))
+                    .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+                    .padding(18.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CreateTrackIcon()
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "Загрузить трек",
+                            color = TrackHubText,
+                            fontSize = 23.sp,
+                            lineHeight = 25.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(3.dp))
+
+                        Text(
+                            text = "Добавьте аудиофайл в TrackHub",
+                            color = TrackHubMutedText,
+                            fontSize = 13.sp,
+                            lineHeight = 17.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                TrackHubInputLabel("Название трека")
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TrackHubTextField(
+                    value = title,
+                    onValueChange = {
+                        title = it
+                        errorText = null
+                        successText = null
+                    },
+                    placeholder = "Введите название трека",
+                    keyboardType = KeyboardType.Text,
+                    leadingContent = {
+                        Text(
+                            text = "♪",
+                            color = TrackHubGoldLight,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                TrackHubInputLabel("Автор")
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TrackHubTextField(
+                    value = author,
+                    onValueChange = {
+                        author = it
+                        errorText = null
+                        successText = null
+                    },
+                    placeholder = "Введите автора",
+                    keyboardType = KeyboardType.Text,
+                    leadingContent = {
+                        MiniAuthorIcon()
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                TrackHubInputLabel("Аудиофайл")
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                AudioFilePickerCard(
+                    selectedFileName = selectedFileName,
+                    enabled = !isLoading,
+                    onClick = {
+                        filePickerLauncher.launch("audio/*")
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                GoldPrimaryButton(
+                    text = "Загрузить",
+                    enabled = !isLoading,
+                    onClick = uploadButton@{
+                        val trimmedTitle = title.trim()
+                        val trimmedAuthor = author.trim()
+                        val fileUri = selectedFileUri
+
+                        errorText = null
+                        successText = null
+
+                        if (trimmedTitle.isBlank()) {
+                            errorText = "Введите название трека"
+                            return@uploadButton
+                        }
+
+                        if (trimmedAuthor.isBlank()) {
+                            errorText = "Введите автора трека"
+                            return@uploadButton
+                        }
+
+                        if (fileUri == null) {
+                            errorText = "Выберите аудиофайл"
+                            return@uploadButton
+                        }
+
+                        scope.launch {
+                            isLoading = true
+                            errorText = null
+                            successText = null
+
+                            try {
+                                uploadTrack(
+                                    context = context,
+                                    title = trimmedTitle,
+                                    author = trimmedAuthor,
+                                    fileUri = fileUri,
+                                    accessToken = accessToken
+                                )
+
+                                title = ""
+                                author = ""
+                                selectedFileUri = null
+                                selectedFileName = null
+                                successText = "Трек успешно загружен"
+
+                                onUploadSuccess()
+                            } catch (e: Exception) {
+                                errorText = e.message ?: "Ошибка загрузки трека"
+                            } finally {
+                                isLoading = false
+                            }
+                        }
+                    }
+                )
+
+                if (isLoading) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = TrackHubGoldLight
+                        )
+                    }
+                }
+
+                successText?.let {
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = it,
+                        color = TrackHubGoldLight,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                errorText?.let {
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Ошибка: $it",
+                        color = Color(0xFFFF6B6B),
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
 
         item {
-            LibraryActionCard(
-                title = "Создать плейлист",
-                subtitle = "Собрать свои треки в подборку",
-                iconText = "▤",
-                onClick = onCreatePlaylistClick
-            )
+            CreatePlaylistHintCard()
         }
 
         item {
             Spacer(modifier = Modifier.height(110.dp))
+        }
+    }
+}
+
+@Composable
+fun CreateTrackIcon() {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(TrackHubGold.copy(alpha = 0.12f))
+            .border(1.3.dp, TrackHubGoldLight, RoundedCornerShape(16.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "♪",
+            color = TrackHubGoldLight,
+            fontSize = 30.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun MiniAuthorIcon() {
+    Canvas(
+        modifier = Modifier.size(20.dp)
+    ) {
+        val stroke = 2.0f
+        val w = size.width
+        val h = size.height
+
+        drawCircle(
+            color = TrackHubGoldLight,
+            radius = w * 0.17f,
+            center = Offset(w * 0.50f, h * 0.28f),
+            style = Stroke(width = stroke)
+        )
+
+        val bodyPath = Path().apply {
+            moveTo(w * 0.20f, h * 0.86f)
+            lineTo(w * 0.20f, h * 0.76f)
+
+            cubicTo(
+                w * 0.20f, h * 0.58f,
+                w * 0.34f, h * 0.50f,
+                w * 0.50f, h * 0.50f
+            )
+
+            cubicTo(
+                w * 0.66f, h * 0.50f,
+                w * 0.80f, h * 0.58f,
+                w * 0.80f, h * 0.76f
+            )
+
+            lineTo(w * 0.80f, h * 0.86f)
+        }
+
+        drawPath(
+            path = bodyPath,
+            color = TrackHubGoldLight,
+            style = Stroke(
+                width = stroke,
+                cap = StrokeCap.Round
+            )
+        )
+    }
+}
+
+@Composable
+fun AudioFilePickerCard(
+    selectedFileName: String?,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(68.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.70f))
+            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(TrackHubGold.copy(alpha = 0.10f))
+                .border(1.dp, TrackHubGoldLight, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "♪",
+                color = TrackHubGoldLight,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = selectedFileName ?: "Выбрать аудиофайл",
+                color = if (selectedFileName == null) TrackHubMutedText else TrackHubText,
+                fontSize = 15.sp,
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = "MP3, WAV или другой audio-файл",
+                color = TrackHubMutedText.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Text(
+            text = "Выбрать",
+            color = TrackHubGoldLight,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun CreatePlaylistHintCard() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.76f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        LibraryCardIcon(
+            iconText = "playlists",
+            boxSize = 44.dp,
+            iconSize = 22.dp,
+            cornerRadius = 13.dp
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = "Плейлисты",
+                color = TrackHubText,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = "Создавать и открывать плейлисты можно в разделе «Моя медиатека».",
+                color = TrackHubMutedText,
+                fontSize = 13.sp,
+                lineHeight = 17.sp
+            )
         }
     }
 }
@@ -2690,27 +3077,30 @@ fun LibraryActionCard(
 
 @Composable
 fun LibraryCardIcon(
-    iconText: String
+    iconText: String,
+    boxSize: androidx.compose.ui.unit.Dp = 48.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 24.dp,
+    cornerRadius: androidx.compose.ui.unit.Dp = 14.dp
 ) {
     Box(
         modifier = Modifier
-            .size(56.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(TrackHubGold.copy(alpha = 0.12f))
-            .border(1.3.dp, TrackHubGoldLight, RoundedCornerShape(16.dp)),
+            .size(boxSize)
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(TrackHubGold.copy(alpha = 0.10f))
+            .border(1.2.dp, TrackHubGoldLight, RoundedCornerShape(cornerRadius)),
         contentAlignment = Alignment.Center
     ) {
         when (iconText) {
             "playlists", "▤" -> {
-                Canvas(modifier = Modifier.size(28.dp)) {
+                Canvas(modifier = Modifier.size(iconSize)) {
                     val color = TrackHubGoldLight
-                    val stroke = 2.2f
+                    val stroke = 2.0f
                     val w = size.width
                     val h = size.height
 
                     drawLine(
                         color = color,
-                        start = Offset(w * 0.18f, h * 0.25f),
+                        start = Offset(w * 0.22f, h * 0.25f),
                         end = Offset(w * 0.82f, h * 0.25f),
                         strokeWidth = stroke,
                         cap = StrokeCap.Round
@@ -2718,7 +3108,7 @@ fun LibraryCardIcon(
 
                     drawLine(
                         color = color,
-                        start = Offset(w * 0.18f, h * 0.50f),
+                        start = Offset(w * 0.22f, h * 0.50f),
                         end = Offset(w * 0.82f, h * 0.50f),
                         strokeWidth = stroke,
                         cap = StrokeCap.Round
@@ -2726,7 +3116,7 @@ fun LibraryCardIcon(
 
                     drawLine(
                         color = color,
-                        start = Offset(w * 0.18f, h * 0.75f),
+                        start = Offset(w * 0.22f, h * 0.75f),
                         end = Offset(w * 0.82f, h * 0.75f),
                         strokeWidth = stroke,
                         cap = StrokeCap.Round
@@ -2734,8 +3124,8 @@ fun LibraryCardIcon(
 
                     drawLine(
                         color = color,
-                        start = Offset(w * 0.18f, h * 0.14f),
-                        end = Offset(w * 0.18f, h * 0.86f),
+                        start = Offset(w * 0.22f, h * 0.15f),
+                        end = Offset(w * 0.22f, h * 0.85f),
                         strokeWidth = stroke,
                         cap = StrokeCap.Round
                     )
@@ -2745,7 +3135,7 @@ fun LibraryCardIcon(
             "likes", "♡" -> {
                 TrackHubPngIcon(
                     drawableId = R.drawable.heart_icon,
-                    size = 34.dp,
+                    size = iconSize,
                     color = null,
                     contentDescription = "Любимые треки"
                 )
@@ -2755,7 +3145,7 @@ fun LibraryCardIcon(
                 Text(
                     text = "♪",
                     color = TrackHubGoldLight,
-                    fontSize = 28.sp,
+                    fontSize = (iconSize.value + 2).sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -2764,7 +3154,7 @@ fun LibraryCardIcon(
                 Text(
                     text = "+",
                     color = TrackHubGoldLight,
-                    fontSize = 34.sp,
+                    fontSize = (iconSize.value + 6).sp,
                     fontWeight = FontWeight.Light
                 )
             }
@@ -2773,7 +3163,7 @@ fun LibraryCardIcon(
                 Text(
                     text = iconText,
                     color = TrackHubGoldLight,
-                    fontSize = 26.sp,
+                    fontSize = iconSize.value.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -3162,6 +3552,7 @@ fun CommentsScreen(
     var comments by remember { mutableStateOf<List<TrackComment>>(emptyList()) }
     var commentText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var isSending by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
     fun loadComments() {
@@ -3183,118 +3574,411 @@ fun CommentsScreen(
         loadComments()
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .background(Color.Black)
     ) {
-        TextButton(
-            onClick = onBack
-        ) {
-            Text("← Назад")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = track.title,
-            style = MaterialTheme.typography.headlineSmall
-        )
-
-        Text(
-            text = track.author,
-            style = MaterialTheme.typography.bodyMedium
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Комментарии",
-            style = MaterialTheme.typography.titleLarge
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = commentText,
-            onValueChange = { commentText = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Ваш комментарий") },
-            minLines = 2
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                val trimmedText = commentText.trim()
-
-                if (trimmedText.isBlank()) {
-                    errorText = "Комментарий не должен быть пустым"
-                    return@Button
-                }
-
-                scope.launch {
-                    isLoading = true
-                    errorText = null
-
-                    try {
-                        addComment(track.id, trimmedText, accessToken)
-                        commentText = ""
-                        comments = fetchComments(track.id)
-                    } catch (e: Exception) {
-                        errorText = e.message ?: "Ошибка отправки комментария"
-                    } finally {
-                        isLoading = false
-                    }
-                }
-            },
-            enabled = !isLoading
-        ) {
-            Text("Отправить")
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (isLoading) {
-            CircularProgressIndicator()
-        }
-
-        errorText?.let {
-            Text(
-                text = "Ошибка: $it",
-                color = MaterialTheme.colorScheme.error
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-        }
+        GoldBackgroundDecorations()
 
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp)
+                .padding(top = 44.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(comments) { comment ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            item {
+                TrackHubBackTextButton(
+                    text = "← Назад",
+                    onClick = onBack
+                )
+            }
+
+            item {
+                CommentsTrackHeader(track = track)
+            }
+
+            item {
+                Text(
+                    text = "Комментарии",
+                    color = TrackHubText,
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(TrackHubSurface.copy(alpha = 0.84f))
+                        .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+                        .padding(16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Text(
-                            text = comment.username,
-                            style = MaterialTheme.typography.titleSmall
-                        )
+                    Text(
+                        text = "Оставить комментарий",
+                        color = TrackHubText,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    CommentInputField(
+                        value = commentText,
+                        onValueChange = {
+                            commentText = it
+                            errorText = null
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    GoldPrimaryButton(
+                        text = "Отправить",
+                        enabled = !isSending && !isLoading,
+                        onClick = sendComment@{
+                            val trimmedText = commentText.trim()
+
+                            if (trimmedText.isBlank()) {
+                                errorText = "Комментарий не должен быть пустым"
+                                return@sendComment
+                            }
+
+                            scope.launch {
+                                isSending = true
+                                errorText = null
+
+                                try {
+                                    addComment(track.id, trimmedText, accessToken)
+                                    commentText = ""
+                                    comments = fetchComments(track.id)
+                                } catch (e: Exception) {
+                                    errorText = e.message ?: "Ошибка отправки комментария"
+                                } finally {
+                                    isSending = false
+                                }
+                            }
+                        }
+                    )
+
+                    if (isSending) {
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = TrackHubGoldLight
+                            )
+                        }
+                    }
+
+                    errorText?.let {
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         Text(
-                            text = comment.text,
-                            style = MaterialTheme.typography.bodyMedium
+                            text = "Ошибка: $it",
+                            color = Color(0xFFFF6B6B),
+                            fontSize = 14.sp,
+                            lineHeight = 18.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
             }
+
+            item {
+                Text(
+                    text = "Список комментариев",
+                    color = TrackHubText,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (isLoading) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = TrackHubGoldLight
+                        )
+                    }
+                }
+            }
+
+            if (comments.isEmpty() && !isLoading) {
+                item {
+                    EmptyCommentsCard()
+                }
+            }
+
+            items(comments) { comment ->
+                CommentCard(comment = comment)
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
         }
+    }
+}
+
+@Composable
+fun CommentsTrackHeader(
+    track: Track
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(TrackHubSurface.copy(alpha = 0.84f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TrackCoverPlaceholder(
+            track = track,
+            modifier = Modifier.size(62.dp)
+        )
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = track.title,
+                color = TrackHubText,
+                fontSize = 20.sp,
+                lineHeight = 23.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = track.author,
+                color = TrackHubGoldLight,
+                fontSize = 14.sp,
+                lineHeight = 17.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "Лайков: ${track.likesCount} · Комментариев: ${track.commentsCount}",
+                color = TrackHubMutedText,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun CommentInputField(
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(96.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.70f))
+            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            textStyle = TextStyle(
+                color = TrackHubText,
+                fontSize = 16.sp,
+                lineHeight = 21.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            cursorBrush = SolidColor(TrackHubGoldLight),
+            modifier = Modifier.fillMaxSize(),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    if (value.isBlank()) {
+                        Text(
+                            text = "Напишите комментарий...",
+                            color = TrackHubMutedText,
+                            fontSize = 16.sp,
+                            lineHeight = 21.sp
+                        )
+                    }
+
+                    innerTextField()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun CommentCard(
+    comment: TrackComment
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF111111).copy(alpha = 0.90f))
+            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(18.dp))
+            .padding(14.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CommentUserIcon()
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = comment.username,
+                    color = TrackHubText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+
+                if (comment.createdAt.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = comment.createdAt.take(16).replace("T", " "),
+                        color = TrackHubMutedText,
+                        fontSize = 11.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = comment.text,
+            color = TrackHubText.copy(alpha = 0.92f),
+            fontSize = 15.sp,
+            lineHeight = 21.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+fun CommentUserIcon() {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(TrackHubGold.copy(alpha = 0.12f))
+            .border(1.dp, TrackHubGoldLight, CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier.size(22.dp)
+        ) {
+            val stroke = 2.0f
+            val w = size.width
+            val h = size.height
+
+            drawCircle(
+                color = TrackHubGoldLight,
+                radius = w * 0.17f,
+                center = Offset(w * 0.50f, h * 0.30f),
+                style = Stroke(width = stroke)
+            )
+
+            val bodyPath = Path().apply {
+                moveTo(w * 0.20f, h * 0.86f)
+                lineTo(w * 0.20f, h * 0.78f)
+
+                cubicTo(
+                    w * 0.20f, h * 0.60f,
+                    w * 0.34f, h * 0.52f,
+                    w * 0.50f, h * 0.52f
+                )
+
+                cubicTo(
+                    w * 0.66f, h * 0.52f,
+                    w * 0.80f, h * 0.60f,
+                    w * 0.80f, h * 0.78f
+                )
+
+                lineTo(w * 0.80f, h * 0.86f)
+            }
+
+            drawPath(
+                path = bodyPath,
+                color = TrackHubGoldLight,
+                style = Stroke(
+                    width = stroke,
+                    cap = StrokeCap.Round
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun EmptyCommentsCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.82f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .padding(vertical = 28.dp, horizontal = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "💬",
+            fontSize = 34.sp
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = "Комментариев пока нет",
+            color = TrackHubText,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "Станьте первым, кто оставит комментарий к этому треку.",
+            color = TrackHubMutedText,
+            fontSize = 13.sp,
+            lineHeight = 17.sp,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -3565,23 +4249,10 @@ fun PlaylistsScreen(
                 }
 
                 item {
-                    Column {
-                        Text(
-                            text = currentPlaylist.name,
-                            color = TrackHubText,
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = "Треков в плейлисте: ${playlistTracks.size}",
-                            color = TrackHubMutedText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    OpenPlaylistHeader(
+                        playlist = currentPlaylist,
+                        tracksCount = playlistTracks.size
+                    )
                 }
 
                 if (isLoading) {
@@ -3603,6 +4274,15 @@ fun PlaylistsScreen(
                     item {
                         TrackHubErrorText(it)
                     }
+                }
+
+                item {
+                    Text(
+                        text = "Треки",
+                        color = TrackHubText,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
                 if (playlistTracks.isEmpty() && !isLoading) {
@@ -3790,7 +4470,12 @@ fun PlaylistNameField(
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        LibraryCardIcon(iconText = "playlists")
+        LibraryCardIcon(
+            iconText = "playlists",
+            boxSize = 34.dp,
+            iconSize = 18.dp,
+            cornerRadius = 10.dp
+        )
 
         Spacer(modifier = Modifier.width(10.dp))
 
@@ -3841,7 +4526,12 @@ fun PlaylistCard(
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        LibraryCardIcon(iconText = "playlists")
+        LibraryCardIcon(
+            iconText = "playlists",
+            boxSize = 48.dp,
+            iconSize = 24.dp,
+            cornerRadius = 14.dp
+        )
 
         Spacer(modifier = Modifier.width(16.dp))
 
@@ -3873,6 +4563,83 @@ fun PlaylistCard(
 }
 
 @Composable
+fun OpenPlaylistHeader(
+    playlist: Playlist,
+    tracksCount: Int
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(TrackHubSurface.copy(alpha = 0.84f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+            .padding(18.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LibraryCardIcon(
+                iconText = "playlists",
+                boxSize = 58.dp,
+                iconSize = 28.dp,
+                cornerRadius = 16.dp
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = playlist.name,
+                    color = TrackHubText,
+                    fontSize = 28.sp,
+                    lineHeight = 31.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 2
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "Треков в плейлисте: $tracksCount",
+                    color = TrackHubMutedText,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            TrackHubGoldLight.copy(alpha = 0.45f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text(
+            text = "Здесь отображаются треки, которые вы добавили в этот плейлист.",
+            color = TrackHubMutedText,
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+    }
+}
+
+@Composable
 fun PlaylistTrackCard(
     track: Track
 ) {
@@ -3881,7 +4648,7 @@ fun PlaylistTrackCard(
             .fillMaxWidth()
             .height(74.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF111111).copy(alpha = 0.88f))
+            .background(Color(0xFF111111).copy(alpha = 0.90f))
             .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(16.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -3894,32 +4661,46 @@ fun PlaylistTrackCard(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
         ) {
             Text(
                 text = track.title,
                 color = TrackHubText,
-                fontSize = 17.sp,
+                fontSize = 16.sp,
+                lineHeight = 19.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1
             )
 
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(3.dp))
 
             Text(
                 text = track.author,
                 color = TrackHubMutedText,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1
             )
         }
 
-        Text(
-            text = "⋮",
-            color = TrackHubMutedText,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable {
+                    // позже сюда можно добавить меню трека
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "⋮",
+                color = TrackHubMutedText,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
@@ -3937,7 +4718,12 @@ fun EmptyPlaylistCard(
             .padding(vertical = 28.dp, horizontal = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        LibraryCardIcon(iconText = "playlists")
+        LibraryCardIcon(
+            iconText = "playlists",
+            boxSize = 52.dp,
+            iconSize = 26.dp,
+            cornerRadius = 15.dp
+        )
 
         Spacer(modifier = Modifier.height(14.dp))
 
