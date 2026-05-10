@@ -96,6 +96,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.trackhub.ui.theme.TrackHubTheme
@@ -183,6 +184,7 @@ enum class LibraryInnerScreen {
     MAIN,
     PLAYLISTS,
     LIKED_TRACKS,
+    MY_TRACKS,
     ALL_TRACKS
 }
 
@@ -306,8 +308,8 @@ fun AuthScreen(
                         return@validateAndSubmit
                     }
 
-                    if (trimmedPassword.length < 6) {
-                        errorText = "Пароль должен содержать минимум 6 символов"
+                    if (trimmedPassword.length < 8) {
+                        errorText = "Пароль должен содержать минимум 8 символов"
                         return@validateAndSubmit
                     }
 
@@ -1125,6 +1127,7 @@ fun CatalogScreen(
     val scope = rememberCoroutineScope()
 
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var myTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -1142,6 +1145,7 @@ fun CatalogScreen(
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
     var selectedTrackMenu by remember { mutableStateOf<Track?>(null) }
     var selectedTrackInfo by remember { mutableStateOf<Track?>(null) }
+    var trackPendingDelete by remember { mutableStateOf<Track?>(null) }
     var showPlaylistsScreen by remember { mutableStateOf(false) }
     var showUploadTrackScreen by remember { mutableStateOf(false) }
     var showProfileScreen by remember { mutableStateOf(false) }
@@ -1167,6 +1171,21 @@ fun CatalogScreen(
                 tracks = fetchTracks(query)
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки треков"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun loadMyTracks() {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                myTracks = fetchMyTracks(accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки моих треков"
             } finally {
                 isLoading = false
             }
@@ -1272,6 +1291,10 @@ fun CatalogScreen(
                 }
 
                 loadTracks(searchQuery)
+
+                if (libraryInnerScreen == LibraryInnerScreen.MY_TRACKS) {
+                    loadMyTracks()
+                }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка удаления трека"
             }
@@ -1296,6 +1319,11 @@ fun CatalogScreen(
             }
 
             isPlaying = player.isPlaying
+
+            if (player.playbackState == Player.STATE_ENDED && tracks.size > 1) {
+                playAdjacentTrack(1)
+                break
+            }
 
             delay(300)
         }
@@ -1580,6 +1608,10 @@ fun CatalogScreen(
                                     onLikedTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.LIKED_TRACKS
                                     },
+                                    onMyTracksClick = {
+                                        libraryInnerScreen = LibraryInnerScreen.MY_TRACKS
+                                        loadMyTracks()
+                                    },
                                     onAllTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
                                     }
@@ -1601,6 +1633,39 @@ fun CatalogScreen(
                                     subtitle = "Треки, которые получили лайки",
                                     emptyText = "Пока нет любимых треков",
                                     tracks = tracks.filter { it.likesCount > 0 },
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying,
+                                    onBack = {
+                                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                                    },
+                                    onPlayClick = { track ->
+                                        if (currentTrack?.id == track.id) {
+                                            togglePlayPause()
+                                        } else {
+                                            playTrack(track)
+                                        }
+                                    },
+                                    onLikeClick = { track ->
+                                        likeAndReload(track)
+                                    },
+                                    onCommentsClick = { track ->
+                                        selectedTrackForComments = track
+                                    },
+                                    onAddToPlaylistClick = { track ->
+                                        selectedTrackForPlaylist = track
+                                    },
+                                    onMoreClick = { track ->
+                                        selectedTrackMenu = track
+                                    }
+                                )
+                            }
+
+                            LibraryInnerScreen.MY_TRACKS -> {
+                                LibraryTracksListScreen(
+                                    title = "Мои треки",
+                                    subtitle = "Треки, которые загрузили именно вы",
+                                    emptyText = "Вы пока не загрузили ни одного трека",
+                                    tracks = myTracks,
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying,
                                     onBack = {
@@ -1738,7 +1803,7 @@ fun CatalogScreen(
                 },
                 onDeleteTrackClick = {
                     selectedTrackMenu = null
-                    deleteTrackAndReload(track)
+                    trackPendingDelete = track
                 }
             )
         }
@@ -1748,6 +1813,19 @@ fun CatalogScreen(
                 track = track,
                 onDismiss = {
                     selectedTrackInfo = null
+                }
+            )
+        }
+
+        trackPendingDelete?.let { track ->
+            DeleteTrackConfirmDialog(
+                track = track,
+                onDismiss = {
+                    trackPendingDelete = null
+                },
+                onConfirm = {
+                    trackPendingDelete = null
+                    deleteTrackAndReload(track)
                 }
             )
         }
@@ -1968,6 +2046,58 @@ fun TrackInfoDialog(
 
             TrackMenuActionButton(
                 text = "Закрыть",
+                danger = false,
+                onClick = onDismiss
+            )
+        }
+    }
+}
+
+@Composable
+fun DeleteTrackConfirmDialog(
+    track: Track,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0B0B0C))
+                .border(1.dp, Color(0x66FF6B6B), RoundedCornerShape(24.dp))
+                .padding(18.dp)
+        ) {
+            Text(
+                text = "Удалить трек?",
+                color = TrackHubText,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "Трек «${track.title}» будет удалён из приложения, а аудиофайл будет удалён с сервера.",
+                color = TrackHubMutedText,
+                fontSize = 14.sp,
+                lineHeight = 19.sp
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            TrackMenuActionButton(
+                text = "Удалить",
+                danger = true,
+                onClick = onConfirm
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TrackMenuActionButton(
+                text = "Отмена",
                 danger = false,
                 onClick = onDismiss
             )
@@ -4786,6 +4916,7 @@ fun LibraryTabScreen(
     tracks: List<Track>,
     onPlaylistsClick: () -> Unit,
     onLikedTracksClick: () -> Unit,
+    onMyTracksClick: () -> Unit,
     onAllTracksClick: () -> Unit
 ) {
     LazyColumn(
@@ -4819,6 +4950,15 @@ fun LibraryTabScreen(
                 subtitle = "Треков с лайками: ${tracks.count { it.likesCount > 0 }}",
                 iconText = "likes",
                 onClick = onLikedTracksClick
+            )
+        }
+
+        item {
+            LibraryActionCard(
+                title = "Мои треки",
+                subtitle = "Показать только мои загруженные треки",
+                iconText = "tracks",
+                onClick = onMyTracksClick
             )
         }
 
@@ -5118,8 +5258,18 @@ fun CreateTabScreen(
                             return@uploadButton
                         }
 
+                        if (trimmedTitle.length > 100) {
+                            errorText = "Название трека должно быть не длиннее 100 символов"
+                            return@uploadButton
+                        }
+
                         if (trimmedAuthor.isBlank()) {
                             errorText = "Введите автора трека"
+                            return@uploadButton
+                        }
+
+                        if (trimmedAuthor.length > 50) {
+                            errorText = "Автор должен быть не длиннее 50 символов"
                             return@uploadButton
                         }
 
@@ -6089,6 +6239,11 @@ fun CommentsScreen(
                                 return@sendComment
                             }
 
+                            if (trimmedText.length > 500) {
+                                errorText = "Комментарий должен быть не длиннее 500 символов"
+                                return@sendComment
+                            }
+
                             scope.launch {
                                 isSending = true
                                 errorText = null
@@ -6527,6 +6682,8 @@ fun AddToPlaylistScreen(
 
                             if (trimmedName.isBlank()) {
                                 errorText = "Название плейлиста не должно быть пустым"
+                            } else if (trimmedName.length > 100) {
+                                errorText = "Название плейлиста должно быть не длиннее 100 символов"
                             } else {
                                 scope.launch {
                                     isLoading = true
@@ -6854,6 +7011,7 @@ fun PlaylistsScreen(
     var playlistTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var playlistName by remember { mutableStateOf("") }
     var selectedPlaylistTrackMenu by remember { mutableStateOf<Track?>(null) }
+    var selectedPlaylistForDelete by remember { mutableStateOf<Playlist?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
@@ -6906,6 +7064,28 @@ fun PlaylistsScreen(
                 playlists = fetchPlaylists(accessToken)
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка удаления трека из плейлиста"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    fun deletePlaylistAndReload(playlist: Playlist) {
+        scope.launch {
+            isLoading = true
+            errorText = null
+
+            try {
+                deletePlaylist(playlist.id, accessToken)
+
+                if (selectedPlaylist?.id == playlist.id) {
+                    selectedPlaylist = null
+                    playlistTracks = emptyList()
+                }
+
+                playlists = fetchPlaylists(accessToken)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка удаления плейлиста"
             } finally {
                 isLoading = false
             }
@@ -7068,6 +7248,11 @@ fun PlaylistsScreen(
                                     return@GoldSmallButton
                                 }
 
+                                if (trimmedName.length > 100) {
+                                    errorText = "Название плейлиста должно быть не длиннее 100 символов"
+                                    return@GoldSmallButton
+                                }
+
                                 scope.launch {
                                     isLoading = true
                                     errorText = null
@@ -7131,6 +7316,9 @@ fun PlaylistsScreen(
                         playlist = playlist,
                         onClick = {
                             openPlaylist(playlist)
+                        },
+                        onDeleteClick = {
+                            selectedPlaylistForDelete = playlist
                         }
                     )
                 }
@@ -7150,6 +7338,19 @@ fun PlaylistsScreen(
                 onRemoveClick = {
                     selectedPlaylistTrackMenu = null
                     removeTrackFromCurrentPlaylist(track)
+                }
+            )
+        }
+
+        selectedPlaylistForDelete?.let { playlist ->
+            DeletePlaylistConfirmDialog(
+                playlist = playlist,
+                onDismiss = {
+                    selectedPlaylistForDelete = null
+                },
+                onConfirm = {
+                    selectedPlaylistForDelete = null
+                    deletePlaylistAndReload(playlist)
                 }
             )
         }
@@ -7231,7 +7432,8 @@ fun PlaylistNameField(
 @Composable
 fun PlaylistCard(
     playlist: Playlist,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -7276,7 +7478,80 @@ fun PlaylistCard(
             )
         }
 
+        Box(
+            modifier = Modifier
+                .height(36.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0xFF2A0808).copy(alpha = 0.78f))
+                .border(1.dp, Color(0x66FF6B6B), RoundedCornerShape(50))
+                .clickable(onClick = onDeleteClick)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Удалить",
+                color = Color(0xFFFF6B6B),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
         LibraryChevronIcon()
+    }
+}
+
+@Composable
+fun DeletePlaylistConfirmDialog(
+    playlist: Playlist,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF0B0B0C))
+                .border(1.dp, Color(0x66FF6B6B), RoundedCornerShape(24.dp))
+                .padding(18.dp)
+        ) {
+            Text(
+                text = "Удалить плейлист?",
+                color = TrackHubText,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "Плейлист «${playlist.name}» будет удалён. Треки останутся в приложении.",
+                color = TrackHubMutedText,
+                fontSize = 14.sp,
+                lineHeight = 19.sp
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            TrackMenuActionButton(
+                text = "Удалить плейлист",
+                danger = true,
+                onClick = onConfirm
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            TrackMenuActionButton(
+                text = "Отмена",
+                danger = false,
+                onClick = onDismiss
+            )
+        }
     }
 }
 
@@ -7642,8 +7917,18 @@ fun UploadTrackScreen(
                     return@uploadButton
                 }
 
+                if (trimmedTitle.length > 100) {
+                    errorText = "Название трека должно быть не длиннее 100 символов"
+                    return@uploadButton
+                }
+
                 if (trimmedAuthor.isBlank()) {
                     errorText = "Введите автора трека"
+                    return@uploadButton
+                }
+
+                if (trimmedAuthor.length > 50) {
+                    errorText = "Автор должен быть не длиннее 50 символов"
                     return@uploadButton
                 }
 
@@ -7819,6 +8104,56 @@ suspend fun fetchTracks(query: String): List<Track> {
             connection.requestMethod = "GET"
             connection.connectTimeout = 5000
             connection.readTimeout = 5000
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            val responseText = readResponseText(connection)
+
+            if (responseCode !in 200..299) {
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+
+            val jsonArray = JSONArray(responseText)
+            val result = mutableListOf<Track>()
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.getJSONObject(i)
+
+                result.add(
+                    Track(
+                        id = item.getInt("id"),
+                        title = item.getString("title"),
+                        author = item.getString("author"),
+                        streamUrl = item.getString("stream_url"),
+                        likesCount = item.optInt("likes_count", 0),
+                        commentsCount = item.optInt("comments_count", 0),
+                        createdAt = item.optString("created_at", ""),
+                        fileSizeBytes = item.optLong("file_size_bytes", 0L),
+                        durationSeconds = item.optInt("duration_seconds", 0),
+                        playCount = item.optInt("play_count", 0)
+                    )
+                )
+            }
+
+            result
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun fetchMyTracks(
+    accessToken: String
+): List<Track> {
+    return withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/tracks/my")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
             connection.setRequestProperty("Accept", "application/json")
 
             val responseCode = connection.responseCode
@@ -8085,6 +8420,33 @@ suspend fun deleteTrack(
 ) {
     withContext(Dispatchers.IO) {
         val url = URL("$BASE_URL/api/tracks/$trackId")
+        val connection = url.openConnection() as HttpURLConnection
+
+        try {
+            connection.requestMethod = "DELETE"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+
+            if (responseCode !in 200..299) {
+                val responseText = readResponseText(connection)
+                throw RuntimeException("Backend вернул код $responseCode: $responseText")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+suspend fun deletePlaylist(
+    playlistId: Int,
+    accessToken: String
+) {
+    withContext(Dispatchers.IO) {
+        val url = URL("$BASE_URL/api/playlists/$playlistId")
         val connection = url.openConnection() as HttpURLConnection
 
         try {
