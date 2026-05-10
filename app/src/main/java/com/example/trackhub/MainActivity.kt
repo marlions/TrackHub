@@ -85,6 +85,7 @@ import com.example.trackhub.ui.theme.TrackHubTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.DataOutputStream
@@ -1084,6 +1085,8 @@ fun CatalogScreen(
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    var currentPositionMs by remember { mutableStateOf(0L) }
+    var durationMs by remember { mutableStateOf(0L) }
 
     var selectedTrackForComments by remember { mutableStateOf<Track?>(null) }
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
@@ -1129,6 +1132,8 @@ fun CatalogScreen(
         player.play()
 
         currentTrack = track
+        currentPositionMs = 0L
+        durationMs = 0L
         isPlaying = true
     }
 
@@ -1159,6 +1164,25 @@ fun CatalogScreen(
 
     LaunchedEffect(Unit) {
         loadTracks()
+    }
+
+    LaunchedEffect(currentTrack?.id) {
+        if (currentTrack == null) return@LaunchedEffect
+
+        while (true) {
+            currentPositionMs = player.currentPosition.coerceAtLeast(0L)
+
+            val playerDuration = player.duration
+            durationMs = if (playerDuration > 0L) {
+                playerDuration
+            } else {
+                0L
+            }
+
+            isPlaying = player.isPlaying
+
+            delay(300)
+        }
     }
 
     val selectedCommentsTrack = selectedTrackForComments
@@ -1335,6 +1359,8 @@ fun CatalogScreen(
                 TrackHubMiniPlayer(
                     track = track,
                     isPlaying = isPlaying,
+                    currentPositionMs = currentPositionMs,
+                    durationMs = durationMs,
                     onPlayPauseClick = {
                         togglePlayPause()
                     }
@@ -1372,7 +1398,7 @@ fun HomeTabScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 18.dp)
-            .padding(top = 28.dp),
+            .padding(top = 42.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         item {
@@ -1383,7 +1409,7 @@ fun HomeTabScreen(
                 Text(
                     text = "Главная",
                     color = TrackHubText,
-                    fontSize = 34.sp,
+                    fontSize = 30.sp,
                     fontWeight = FontWeight.ExtraBold,
                     modifier = Modifier.weight(1f)
                 )
@@ -1460,12 +1486,12 @@ fun LikedTracksSection(
         ) {
             HeartStackIcon()
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
             Text(
                 text = "Ваши лайки",
                 color = TrackHubText,
-                fontSize = 25.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f)
             )
@@ -1481,7 +1507,7 @@ fun LikedTracksSection(
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                tracks.chunked(2).forEach { rowTracks ->
+                tracks.take(8).chunked(2).forEach { rowTracks ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1529,12 +1555,13 @@ fun RecentlyAddedSection(
         ) {
             ClockGoldIcon()
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
             Text(
                 text = "Недавно добавленные",
                 color = TrackHubText,
-                fontSize = 25.sp,
+                fontSize = 22.sp,
+                lineHeight = 24.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f)
             )
@@ -1542,7 +1569,7 @@ fun RecentlyAddedSection(
             Text(
                 text = "Показать все ›",
                 color = TrackHubGoldLight,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -1552,16 +1579,13 @@ fun RecentlyAddedSection(
         if (tracks.isEmpty()) {
             EmptySectionText("Пока нет загруженных треков")
         } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(tracks) { track ->
-                    RecentTrackCard(
+                tracks.take(4).forEach { track ->
+                    RecentlyAddedWideTrackCard(
                         track = track,
-                        onPlayClick = { onPlayClick(track) },
-                        onLikeClick = { onLikeClick(track) },
-                        onCommentsClick = { onCommentsClick(track) },
-                        onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                        onPlayClick = { onPlayClick(track) }
                     )
                 }
             }
@@ -1664,6 +1688,60 @@ fun RecentTrackCard(
 }
 
 @Composable
+fun RecentlyAddedWideTrackCard(
+    track: Track,
+    onPlayClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(66.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF111111).copy(alpha = 0.88f))
+            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(12.dp))
+            .clickable(onClick = onPlayClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TrackCoverPlaceholder(
+            track = track,
+            modifier = Modifier.size(50.dp)
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = track.title,
+                color = TrackHubText,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = track.author,
+                color = TrackHubMutedText,
+                fontSize = 14.sp,
+                maxLines = 1
+            )
+        }
+
+        Text(
+            text = "⋮",
+            color = TrackHubMutedText,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 8.dp)
+        )
+    }
+}
+
+@Composable
 fun TrackCoverPlaceholder(
     track: Track,
     modifier: Modifier = Modifier
@@ -1698,8 +1776,16 @@ fun TrackCoverPlaceholder(
 fun TrackHubMiniPlayer(
     track: Track,
     isPlaying: Boolean,
+    currentPositionMs: Long,
+    durationMs: Long,
     onPlayPauseClick: () -> Unit
 ) {
+    val progress = if (durationMs > 0L) {
+        (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1750,16 +1836,27 @@ fun TrackHubMiniPlayer(
             Box(
                 modifier = Modifier
                     .size(54.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .border(1.dp, TrackHubGoldLight, RoundedCornerShape(50))
                     .clickable(onClick = onPlayPauseClick),
                 contentAlignment = Alignment.Center
             ) {
                 if (isPlaying) {
-                    PauseGoldIcon()
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .border(1.dp, TrackHubGoldLight, RoundedCornerShape(50)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        PauseGoldIcon()
+                    }
                 } else {
-                    PlayGoldIcon()
+                    TrackHubPngIcon(
+                        drawableId = R.drawable.play_icon,
+                        size = 54.dp,
+                        color = null,
+                        contentDescription = "Play"
+                    )
                 }
             }
         }
@@ -1771,11 +1868,11 @@ fun TrackHubMiniPlayer(
                 .fillMaxWidth()
                 .height(4.dp)
                 .clip(RoundedCornerShape(50))
-                .background(Color.White.copy(alpha = 0.20f))
+                .background(Color.White.copy(alpha = 0.18f))
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.45f)
+                    .fillMaxWidth(progress)
                     .fillMaxHeight()
                     .background(TrackHubGoldLight)
             )
@@ -2311,16 +2408,13 @@ fun ProfileCircleButton(
     Box(
         modifier = Modifier
             .size(58.dp)
-            .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.35f))
-            .border(1.4.dp, TrackHubGoldLight, RoundedCornerShape(50))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         TrackHubPngIcon(
             drawableId = R.drawable.profile_icon,
-            size = 34.dp,
-            color = TrackHubGoldLight,
+            size = 58.dp,
+            color = null,
             contentDescription = "Профиль"
         )
     }
@@ -2330,8 +2424,8 @@ fun ProfileCircleButton(
 fun HeartStackIcon() {
     TrackHubPngIcon(
         drawableId = R.drawable.heart_icon,
-        size = 54.dp,
-        color = TrackHubGoldLight,
+        size = 44.dp,
+        color = null,
         contentDescription = "Ваши лайки"
     )
 }
@@ -2339,17 +2433,13 @@ fun HeartStackIcon() {
 @Composable
 fun ShuffleCircleIcon() {
     Box(
-        modifier = Modifier
-            .size(52.dp)
-            .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.55f))
-            .border(1.2.dp, TrackHubGoldLight, RoundedCornerShape(50)),
+        modifier = Modifier.size(44.dp),
         contentAlignment = Alignment.Center
     ) {
         TrackHubPngIcon(
             drawableId = R.drawable.shuffle_icon,
-            size = 25.dp,
-            color = TrackHubText,
+            size = 44.dp,
+            color = null,
             contentDescription = "Перемешать"
         )
     }
@@ -2358,16 +2448,13 @@ fun ShuffleCircleIcon() {
 @Composable
 fun ClockGoldIcon() {
     Box(
-        modifier = Modifier
-            .size(50.dp)
-            .clip(RoundedCornerShape(50))
-            .border(2.dp, TrackHubGoldLight, RoundedCornerShape(50)),
+        modifier = Modifier.size(42.dp),
         contentAlignment = Alignment.Center
     ) {
         TrackHubPngIcon(
             drawableId = R.drawable.time_icon,
-            size = 25.dp,
-            color = TrackHubGoldLight,
+            size = 42.dp,
+            color = null,
             contentDescription = "Недавно добавленные"
         )
     }
@@ -2378,7 +2465,7 @@ fun PlayGoldIcon() {
     TrackHubPngIcon(
         drawableId = R.drawable.play_icon,
         size = 28.dp,
-        color = Color.White,
+        color = null,
         contentDescription = "Play"
     )
 }
