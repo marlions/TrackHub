@@ -1,10 +1,11 @@
 package com.example.trackhub
 
 
-
-
-import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
@@ -90,6 +91,10 @@ import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 
 private const val BASE_URL = "http://10.0.2.2:8000"
 
@@ -126,9 +131,17 @@ data class Playlist(
     val tracksCount: Int
 )
 
+enum class MainTab {
+    HOME,
+    SEARCH,
+    LIBRARY,
+    CREATE
+}
+
 class MainActivity : ComponentActivity() {
     @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         setContent {
@@ -825,7 +838,7 @@ fun GoldPrimaryButton(
 @Composable
 fun MiniEnvelopeIcon() {
     Image(
-        painter = painterResource(id = R.drawable.`screenshot_8`),
+        painter = painterResource(id = R.drawable.screenshot_8),
         contentDescription = "Email icon",
         modifier = Modifier.size(20.dp),
         contentScale = ContentScale.Fit
@@ -1053,6 +1066,7 @@ fun MiniChevronRightIcon() {
         )
     }
 }
+
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogScreen(
@@ -1066,7 +1080,10 @@ fun CatalogScreen(
     var searchQuery by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
-    var currentTrackTitle by remember { mutableStateOf<String?>(null) }
+
+    var currentTab by remember { mutableStateOf(MainTab.HOME) }
+    var currentTrack by remember { mutableStateOf<Track?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
 
     var selectedTrackForComments by remember { mutableStateOf<Track?>(null) }
     var selectedTrackForPlaylist by remember { mutableStateOf<Track?>(null) }
@@ -1098,6 +1115,48 @@ fun CatalogScreen(
         }
     }
 
+    fun playTrack(track: Track) {
+        val fullStreamUrl = if (track.streamUrl.startsWith("http")) {
+            track.streamUrl
+        } else {
+            BASE_URL + track.streamUrl
+        }
+
+        val mediaItem = MediaItem.fromUri(Uri.parse(fullStreamUrl))
+
+        player.setMediaItem(mediaItem)
+        player.prepare()
+        player.play()
+
+        currentTrack = track
+        isPlaying = true
+    }
+
+    fun togglePlayPause() {
+        if (currentTrack == null) return
+
+        if (player.isPlaying) {
+            player.pause()
+            isPlaying = false
+        } else {
+            player.play()
+            isPlaying = true
+        }
+    }
+
+    fun likeAndReload(track: Track) {
+        scope.launch {
+            errorText = null
+
+            try {
+                likeTrack(track.id, accessToken)
+                loadTracks(searchQuery)
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка лайка"
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         loadTracks()
     }
@@ -1120,7 +1179,10 @@ fun CatalogScreen(
             accessToken = accessToken,
             onBack = closeComments
         )
-    } else if (selectedPlaylistTrack != null) {
+        return
+    }
+
+    if (selectedPlaylistTrack != null) {
         val closePlaylistAdd = {
             selectedTrackForPlaylist = null
             loadTracks(searchQuery)
@@ -1135,7 +1197,10 @@ fun CatalogScreen(
             accessToken = accessToken,
             onBack = closePlaylistAdd
         )
-    } else if (showPlaylistsScreen) {
+        return
+    }
+
+    if (showPlaylistsScreen) {
         val closePlaylists = {
             showPlaylistsScreen = false
             loadTracks(searchQuery)
@@ -1149,7 +1214,10 @@ fun CatalogScreen(
             accessToken = accessToken,
             onBack = closePlaylists
         )
-    } else if (showUploadTrackScreen) {
+        return
+    }
+
+    if (showUploadTrackScreen) {
         val closeUploadScreen = {
             showUploadTrackScreen = false
             loadTracks(searchQuery)
@@ -1166,170 +1234,1205 @@ fun CatalogScreen(
                 closeUploadScreen()
             }
         )
-    } else {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text("TrackHub")
-                    },
-                    actions = {
-                        TextButton(
-                            onClick = {
+        return
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        GoldBackgroundDecorations()
+
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when (currentTab) {
+                    MainTab.HOME -> {
+                        HomeTabScreen(
+                            tracks = tracks,
+                            isLoading = isLoading,
+                            errorText = errorText,
+                            onLogout = {
                                 player.pause()
                                 onLogout()
-                            }
-                        ) {
-                            Text("Выйти")
-                        }
-                    }
-                )
-            }
-        ) { innerPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = "Музыкальный каталог",
-                    style = MaterialTheme.typography.headlineSmall
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        modifier = Modifier.weight(1f),
-                        label = { Text("Поиск трека") },
-                        singleLine = true
-                    )
-
-                    Button(
-                        onClick = {
-                            loadTracks(searchQuery)
-                        }
-                    ) {
-                        Text("Найти")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            searchQuery = ""
-                            loadTracks()
-                        }
-                    ) {
-                        Text("Все треки")
-                    }
-
-                    Button(
-                        onClick = {
-                            showPlaylistsScreen = true
-                        }
-                    ) {
-                        Text("Мои плейлисты")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Button(
-                    onClick = {
-                        showUploadTrackScreen = true
-                    }
-                ) {
-                    Text("Загрузить трек")
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                currentTrackTitle?.let {
-                    Text(
-                        text = "Сейчас играет: $it",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Button(
-                        onClick = {
-                            player.pause()
-                        }
-                    ) {
-                        Text("Пауза")
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-
-                if (isLoading) {
-                    CircularProgressIndicator()
-                }
-
-                errorText?.let {
-                    Text(
-                        text = "Ошибка: $it",
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(tracks) { track ->
-                        TrackCard(
-                            track = track,
-                            onPlayClick = {
-                                val fullStreamUrl = if (track.streamUrl.startsWith("http")) {
-                                    track.streamUrl
-                                } else {
-                                    BASE_URL + track.streamUrl
-                                }
-
-                                val mediaItem = MediaItem.fromUri(Uri.parse(fullStreamUrl))
-
-                                player.setMediaItem(mediaItem)
-                                player.prepare()
-                                player.play()
-
-                                currentTrackTitle = "${track.title} — ${track.author}"
                             },
-                            onLikeClick = {
-                                scope.launch {
-                                    errorText = null
-
-                                    try {
-                                        likeTrack(track.id, accessToken)
-                                        loadTracks(searchQuery)
-                                    } catch (e: Exception) {
-                                        errorText = e.message ?: "Ошибка лайка"
-                                    }
-                                }
+                            onPlayClick = { track ->
+                                playTrack(track)
                             },
-                            onCommentsClick = {
+                            onLikeClick = { track ->
+                                likeAndReload(track)
+                            },
+                            onCommentsClick = { track ->
                                 selectedTrackForComments = track
                             },
-                            onAddToPlaylistClick = {
+                            onAddToPlaylistClick = { track ->
                                 selectedTrackForPlaylist = track
+                            }
+                        )
+                    }
+
+                    MainTab.SEARCH -> {
+                        SearchTabScreen(
+                            searchQuery = searchQuery,
+                            onSearchQueryChange = { searchQuery = it },
+                            tracks = tracks,
+                            isLoading = isLoading,
+                            errorText = errorText,
+                            onSearchClick = {
+                                loadTracks(searchQuery)
+                            },
+                            onAllTracksClick = {
+                                searchQuery = ""
+                                loadTracks()
+                            },
+                            onPlayClick = { track ->
+                                playTrack(track)
+                            },
+                            onLikeClick = { track ->
+                                likeAndReload(track)
+                            },
+                            onCommentsClick = { track ->
+                                selectedTrackForComments = track
+                            },
+                            onAddToPlaylistClick = { track ->
+                                selectedTrackForPlaylist = track
+                            }
+                        )
+                    }
+
+                    MainTab.LIBRARY -> {
+                        LibraryTabScreen(
+                            tracks = tracks,
+                            onPlaylistsClick = {
+                                showPlaylistsScreen = true
+                            },
+                            onLikedTracksClick = {
+                                currentTab = MainTab.HOME
+                            }
+                        )
+                    }
+
+                    MainTab.CREATE -> {
+                        CreateTabScreen(
+                            onUploadTrackClick = {
+                                showUploadTrackScreen = true
+                            },
+                            onCreatePlaylistClick = {
+                                showPlaylistsScreen = true
                             }
                         )
                     }
                 }
             }
+
+            currentTrack?.let { track ->
+                TrackHubMiniPlayer(
+                    track = track,
+                    isPlaying = isPlaying,
+                    onPlayPauseClick = {
+                        togglePlayPause()
+                    }
+                )
+            }
+
+            TrackHubBottomNavigation(
+                currentTab = currentTab,
+                onTabClick = { tab ->
+                    currentTab = tab
+                }
+            )
         }
     }
+}
+
+@Composable
+fun HomeTabScreen(
+    tracks: List<Track>,
+    isLoading: Boolean,
+    errorText: String?,
+    onLogout: () -> Unit,
+    onPlayClick: (Track) -> Unit,
+    onLikeClick: (Track) -> Unit,
+    onCommentsClick: (Track) -> Unit,
+    onAddToPlaylistClick: (Track) -> Unit
+) {
+    val likedTracks = tracks
+        .filter { it.likesCount > 0 }
+        .take(8)
+
+    val recentTracks = tracks.take(8)
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp)
+            .padding(top = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Главная",
+                    color = TrackHubText,
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.weight(1f)
+                )
+
+                ProfileCircleButton(
+                    onClick = onLogout
+                )
+            }
+        }
+
+        if (isLoading) {
+            item {
+                CircularProgressIndicator(
+                    color = TrackHubGoldLight
+                )
+            }
+        }
+
+        errorText?.let {
+            item {
+                Text(
+                    text = "Ошибка: $it",
+                    color = Color(0xFFFF6B6B),
+                    fontSize = 14.sp
+                )
+            }
+        }
+
+        item {
+            LikedTracksSection(
+                tracks = likedTracks,
+                onPlayClick = onPlayClick,
+                onLikeClick = onLikeClick,
+                onCommentsClick = onCommentsClick,
+                onAddToPlaylistClick = onAddToPlaylistClick
+            )
+        }
+
+        item {
+            RecentlyAddedSection(
+                tracks = recentTracks,
+                onPlayClick = onPlayClick,
+                onLikeClick = onLikeClick,
+                onCommentsClick = onCommentsClick,
+                onAddToPlaylistClick = onAddToPlaylistClick
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(110.dp))
+        }
+    }
+}
+
+@Composable
+fun LikedTracksSection(
+    tracks: List<Track>,
+    onPlayClick: (Track) -> Unit,
+    onLikeClick: (Track) -> Unit,
+    onCommentsClick: (Track) -> Unit,
+    onAddToPlaylistClick: (Track) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(TrackHubSurface.copy(alpha = 0.78f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+            .padding(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HeartStackIcon()
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Text(
+                text = "Ваши лайки",
+                color = TrackHubText,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+
+            ShuffleCircleIcon()
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (tracks.isEmpty()) {
+            EmptySectionText("Вы пока не лайкнули ни одного трека")
+        } else {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                tracks.chunked(2).forEach { rowTracks ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        rowTracks.forEach { track ->
+                            HomeSmallTrackCard(
+                                track = track,
+                                modifier = Modifier.weight(1f),
+                                onPlayClick = { onPlayClick(track) },
+                                onLikeClick = { onLikeClick(track) },
+                                onCommentsClick = { onCommentsClick(track) },
+                                onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                            )
+                        }
+
+                        if (rowTracks.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecentlyAddedSection(
+    tracks: List<Track>,
+    onPlayClick: (Track) -> Unit,
+    onLikeClick: (Track) -> Unit,
+    onCommentsClick: (Track) -> Unit,
+    onAddToPlaylistClick: (Track) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(TrackHubSurface.copy(alpha = 0.78f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(22.dp))
+            .padding(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ClockGoldIcon()
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Text(
+                text = "Недавно добавленные",
+                color = TrackHubText,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+
+            Text(
+                text = "Показать все ›",
+                color = TrackHubGoldLight,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (tracks.isEmpty()) {
+            EmptySectionText("Пока нет загруженных треков")
+        } else {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(tracks) { track ->
+                    RecentTrackCard(
+                        track = track,
+                        onPlayClick = { onPlayClick(track) },
+                        onLikeClick = { onLikeClick(track) },
+                        onCommentsClick = { onCommentsClick(track) },
+                        onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeSmallTrackCard(
+    track: Track,
+    modifier: Modifier = Modifier,
+    onPlayClick: () -> Unit,
+    onLikeClick: () -> Unit,
+    onCommentsClick: () -> Unit,
+    onAddToPlaylistClick: () -> Unit
+) {
+    Row(
+        modifier = modifier
+            .height(72.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF141414))
+            .border(1.dp, Color(0x22FFC84D), RoundedCornerShape(10.dp))
+            .clickable(onClick = onPlayClick)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TrackCoverPlaceholder(
+            track = track,
+            modifier = Modifier.size(54.dp)
+        )
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = track.title,
+                color = TrackHubText,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = track.author,
+                color = TrackHubMutedText,
+                fontSize = 13.sp,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun RecentTrackCard(
+    track: Track,
+    onPlayClick: () -> Unit,
+    onLikeClick: () -> Unit,
+    onCommentsClick: () -> Unit,
+    onAddToPlaylistClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(132.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF121212))
+            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(12.dp))
+            .clickable(onClick = onPlayClick)
+            .padding(10.dp)
+    ) {
+        TrackCoverPlaceholder(
+            track = track,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(112.dp)
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = track.title,
+            color = TrackHubText,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = track.author,
+            color = TrackHubMutedText,
+            fontSize = 13.sp,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+fun TrackCoverPlaceholder(
+    track: Track,
+    modifier: Modifier = Modifier
+) {
+    val colors = when (track.id % 5) {
+        0 -> listOf(Color(0xFF3A0A0A), Color(0xFFD99B00))
+        1 -> listOf(Color(0xFF111111), Color(0xFF6A1111))
+        2 -> listOf(Color(0xFF1B1B1B), Color(0xFF444444))
+        3 -> listOf(Color(0xFF101020), Color(0xFFB7860B))
+        else -> listOf(Color(0xFF080808), Color(0xFF322000))
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                Brush.linearGradient(colors)
+            )
+            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "♪",
+            color = TrackHubGoldLight,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun TrackHubMiniPlayer(
+    track: Track,
+    isPlaying: Boolean,
+    onPlayPauseClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        Color(0xFF210200),
+                        Color(0xFF3A0700),
+                        Color(0xFF120000)
+                    )
+                )
+            )
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(16.dp))
+            .padding(10.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TrackCoverPlaceholder(
+                track = track,
+                modifier = Modifier.size(54.dp)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = track.title,
+                    color = TrackHubText,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+
+                Text(
+                    text = track.author,
+                    color = TrackHubGoldLight,
+                    fontSize = 14.sp,
+                    maxLines = 1
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .border(1.dp, TrackHubGoldLight, RoundedCornerShape(50))
+                    .clickable(onClick = onPlayPauseClick),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isPlaying) {
+                    PauseGoldIcon()
+                } else {
+                    PlayGoldIcon()
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = 0.20f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.45f)
+                    .fillMaxHeight()
+                    .background(TrackHubGoldLight)
+            )
+        }
+    }
+}
+
+@Composable
+fun TrackHubBottomNavigation(
+    currentTab: MainTab,
+    onTabClick: (MainTab) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(82.dp)
+            .background(Color.Black.copy(alpha = 0.96f))
+            .border(1.dp, Color(0x16FFFFFF))
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BottomNavItem(
+            tab = MainTab.HOME,
+            currentTab = currentTab,
+            title = "Главная",
+            onClick = onTabClick
+        )
+
+        BottomNavItem(
+            tab = MainTab.SEARCH,
+            currentTab = currentTab,
+            title = "Поиск",
+            onClick = onTabClick
+        )
+
+        BottomNavItem(
+            tab = MainTab.LIBRARY,
+            currentTab = currentTab,
+            title = "Моя медиатека",
+            onClick = onTabClick
+        )
+
+        BottomNavItem(
+            tab = MainTab.CREATE,
+            currentTab = currentTab,
+            title = "Создать",
+            onClick = onTabClick
+        )
+    }
+}
+
+@Composable
+fun RowScope.BottomNavItem(
+    tab: MainTab,
+    currentTab: MainTab,
+    title: String,
+    onClick: (MainTab) -> Unit
+) {
+    val selected = tab == currentTab
+
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .clickable {
+                onClick(tab)
+            },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        BottomNavIcon(
+            tab = tab,
+            selected = selected
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = title,
+            color = if (selected) TrackHubGoldLight else TrackHubMutedText,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+fun SearchTabScreen(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    tracks: List<Track>,
+    isLoading: Boolean,
+    errorText: String?,
+    onSearchClick: () -> Unit,
+    onAllTracksClick: () -> Unit,
+    onPlayClick: (Track) -> Unit,
+    onLikeClick: (Track) -> Unit,
+    onCommentsClick: (Track) -> Unit,
+    onAddToPlaylistClick: (Track) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp)
+            .padding(top = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text(
+                text = "Поиск",
+                color = TrackHubText,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+
+        item {
+            TrackHubSearchField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange
+            )
+        }
+
+        item {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                GoldSmallButton(
+                    text = "Найти",
+                    onClick = onSearchClick
+                )
+
+                DarkSmallButton(
+                    text = "Все треки",
+                    onClick = onAllTracksClick
+                )
+            }
+        }
+
+        if (isLoading) {
+            item {
+                CircularProgressIndicator(color = TrackHubGoldLight)
+            }
+        }
+
+        errorText?.let {
+            item {
+                Text(
+                    text = "Ошибка: $it",
+                    color = Color(0xFFFF6B6B)
+                )
+            }
+        }
+
+        items(tracks) { track ->
+            DarkTrackListCard(
+                track = track,
+                onPlayClick = { onPlayClick(track) },
+                onLikeClick = { onLikeClick(track) },
+                onCommentsClick = { onCommentsClick(track) },
+                onAddToPlaylistClick = { onAddToPlaylistClick(track) }
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(110.dp))
+        }
+    }
+}
+
+@Composable
+fun LibraryTabScreen(
+    tracks: List<Track>,
+    onPlaylistsClick: () -> Unit,
+    onLikedTracksClick: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp)
+            .padding(top = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Text(
+                text = "Моя медиатека",
+                color = TrackHubText,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+
+        item {
+            LibraryActionCard(
+                title = "Мои плейлисты",
+                subtitle = "Открыть созданные плейлисты",
+                iconText = "▤",
+                onClick = onPlaylistsClick
+            )
+        }
+
+        item {
+            LibraryActionCard(
+                title = "Любимые треки",
+                subtitle = "Треков с лайками: ${tracks.count { it.likesCount > 0 }}",
+                iconText = "♡",
+                onClick = onLikedTracksClick
+            )
+        }
+
+        item {
+            LibraryActionCard(
+                title = "Все треки",
+                subtitle = "Всего треков: ${tracks.size}",
+                iconText = "♪",
+                onClick = {}
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(110.dp))
+        }
+    }
+}
+
+@Composable
+fun CreateTabScreen(
+    onUploadTrackClick: () -> Unit,
+    onCreatePlaylistClick: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp)
+            .padding(top = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Text(
+                text = "Создать",
+                color = TrackHubText,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+
+        item {
+            LibraryActionCard(
+                title = "Загрузить трек",
+                subtitle = "Добавить новый MP3-файл в TrackHub",
+                iconText = "+",
+                onClick = onUploadTrackClick
+            )
+        }
+
+        item {
+            LibraryActionCard(
+                title = "Создать плейлист",
+                subtitle = "Собрать свои треки в подборку",
+                iconText = "▤",
+                onClick = onCreatePlaylistClick
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(110.dp))
+        }
+    }
+}
+
+@Composable
+fun DarkTrackListCard(
+    track: Track,
+    onPlayClick: () -> Unit,
+    onLikeClick: () -> Unit,
+    onCommentsClick: () -> Unit,
+    onAddToPlaylistClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF111111))
+            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(14.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TrackCoverPlaceholder(
+                track = track,
+                modifier = Modifier.size(58.dp)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = track.title,
+                    color = TrackHubText,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+
+                Text(
+                    text = track.author,
+                    color = TrackHubMutedText,
+                    fontSize = 14.sp,
+                    maxLines = 1
+                )
+
+                Text(
+                    text = "Лайков: ${track.likesCount} · Комментариев: ${track.commentsCount}",
+                    color = TrackHubMutedText,
+                    fontSize = 12.sp,
+                    maxLines = 1
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(TrackHubGold)
+                    .clickable(onClick = onPlayClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "▶",
+                    color = Color.White,
+                    fontSize = 18.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            DarkSmallButton("Лайк", onLikeClick)
+            DarkSmallButton("Комментарии", onCommentsClick)
+            DarkSmallButton("В плейлист", onAddToPlaylistClick)
+        }
+    }
+}
+
+@Composable
+fun LibraryActionCard(
+    title: String,
+    subtitle: String,
+    iconText: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(TrackHubSurface.copy(alpha = 0.80f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(54.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(TrackHubGold.copy(alpha = 0.18f))
+                .border(1.dp, TrackHubGoldLight, RoundedCornerShape(16.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = iconText,
+                color = TrackHubGoldLight,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = title,
+                color = TrackHubText,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = subtitle,
+                color = TrackHubMutedText,
+                fontSize = 14.sp
+            )
+        }
+
+        Text(
+            text = "›",
+            color = TrackHubGoldLight,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun TrackHubPngIcon(
+    drawableId: Int,
+    size: androidx.compose.ui.unit.Dp,
+    color: Color? = null,
+    contentDescription: String? = null
+) {
+    Image(
+        painter = painterResource(id = drawableId),
+        contentDescription = contentDescription,
+        modifier = Modifier.size(size),
+        contentScale = ContentScale.Fit,
+        colorFilter = color?.let { ColorFilter.tint(it) }
+    )
+}
+
+@Composable
+fun TrackHubSearchField(
+    value: String,
+    onValueChange: (String) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF080808))
+            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = TextStyle(
+                color = TrackHubText,
+                fontSize = 17.sp
+            ),
+            cursorBrush = SolidColor(TrackHubGoldLight),
+            modifier = Modifier.fillMaxWidth(),
+            decorationBox = { innerTextField ->
+                if (value.isBlank()) {
+                    Text(
+                        text = "Поиск трека",
+                        color = TrackHubMutedText,
+                        fontSize = 17.sp
+                    )
+                }
+                innerTextField()
+            }
+        )
+    }
+}
+
+@Composable
+fun GoldSmallButton(
+    text: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .height(42.dp)
+            .clip(RoundedCornerShape(50))
+            .background(TrackHubGold)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun DarkSmallButton(
+    text: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .height(42.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color(0xFF181818))
+            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = TrackHubText,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+fun EmptySectionText(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(80.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = TrackHubMutedText,
+            fontSize = 15.sp
+        )
+    }
+}
+
+@Composable
+fun ProfileCircleButton(
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(58.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.35f))
+            .border(1.4.dp, TrackHubGoldLight, RoundedCornerShape(50))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        TrackHubPngIcon(
+            drawableId = R.drawable.profile_icon,
+            size = 34.dp,
+            color = TrackHubGoldLight,
+            contentDescription = "Профиль"
+        )
+    }
+}
+
+@Composable
+fun HeartStackIcon() {
+    TrackHubPngIcon(
+        drawableId = R.drawable.heart_icon,
+        size = 54.dp,
+        color = TrackHubGoldLight,
+        contentDescription = "Ваши лайки"
+    )
+}
+
+@Composable
+fun ShuffleCircleIcon() {
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .border(1.2.dp, TrackHubGoldLight, RoundedCornerShape(50)),
+        contentAlignment = Alignment.Center
+    ) {
+        TrackHubPngIcon(
+            drawableId = R.drawable.shuffle_icon,
+            size = 25.dp,
+            color = TrackHubText,
+            contentDescription = "Перемешать"
+        )
+    }
+}
+
+@Composable
+fun ClockGoldIcon() {
+    Box(
+        modifier = Modifier
+            .size(50.dp)
+            .clip(RoundedCornerShape(50))
+            .border(2.dp, TrackHubGoldLight, RoundedCornerShape(50)),
+        contentAlignment = Alignment.Center
+    ) {
+        TrackHubPngIcon(
+            drawableId = R.drawable.time_icon,
+            size = 25.dp,
+            color = TrackHubGoldLight,
+            contentDescription = "Недавно добавленные"
+        )
+    }
+}
+
+@Composable
+fun PlayGoldIcon() {
+    TrackHubPngIcon(
+        drawableId = R.drawable.play_icon,
+        size = 28.dp,
+        color = Color.White,
+        contentDescription = "Play"
+    )
+}
+
+@Composable
+fun PauseGoldIcon() {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .width(6.dp)
+                .height(24.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(TrackHubGoldLight)
+        )
+
+        Box(
+            modifier = Modifier
+                .width(6.dp)
+                .height(24.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(TrackHubGoldLight)
+        )
+    }
+}
+
+@Composable
+fun BottomNavIcon(
+    tab: MainTab,
+    selected: Boolean
+) {
+    val color = if (selected) TrackHubGoldLight else TrackHubMutedText
+
+    val icon = when (tab) {
+        MainTab.HOME -> R.drawable.home_icon
+        MainTab.SEARCH -> R.drawable.search_icon
+        MainTab.LIBRARY -> R.drawable.library_icon
+        MainTab.CREATE -> R.drawable.create_icon
+    }
+
+    val size = when (tab) {
+        MainTab.HOME -> 30.dp
+        MainTab.SEARCH -> 31.dp
+        MainTab.LIBRARY -> 31.dp
+        MainTab.CREATE -> 34.dp
+    }
+
+    TrackHubPngIcon(
+        drawableId = icon,
+        size = size,
+        color = null,
+        contentDescription = null
+    )
 }
 
 @Composable
