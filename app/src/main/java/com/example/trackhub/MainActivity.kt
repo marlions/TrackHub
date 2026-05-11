@@ -19,11 +19,13 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import android.app.Application
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.activity.viewModels
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -91,6 +93,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.lifecycle.AndroidViewModel
 import com.example.trackhub.ui.theme.TrackHubTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -114,6 +117,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 
 private const val BASE_URL = "http://10.0.2.2:8000"
+private const val SESSION_PREFS_NAME = "trackhub_session"
+private const val SESSION_ACCESS_TOKEN_KEY = "access_token"
 
 private val TrackHubBackground = Color(0xFF030303)
 private val TrackHubSurface = Color(0xE6080809)
@@ -199,7 +204,39 @@ enum class LibraryInnerScreen {
     ALL_TRACKS
 }
 
+class SessionViewModel(application: Application) : AndroidViewModel(application) {
+    private val sessionPrefs = application.getSharedPreferences(
+        SESSION_PREFS_NAME,
+        Context.MODE_PRIVATE
+    )
+
+    var accessToken by mutableStateOf<String?>(
+        sessionPrefs.getString(SESSION_ACCESS_TOKEN_KEY, null)
+    )
+        private set
+
+    fun saveAccessToken(token: String) {
+        sessionPrefs
+            .edit()
+            .putString(SESSION_ACCESS_TOKEN_KEY, token)
+            .apply()
+
+        accessToken = token
+    }
+
+    fun clearAccessToken() {
+        sessionPrefs
+            .edit()
+            .remove(SESSION_ACCESS_TOKEN_KEY)
+            .apply()
+
+        accessToken = null
+    }
+}
+
 class MainActivity : ComponentActivity() {
+    private val sessionViewModel: SessionViewModel by viewModels()
+
     @OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -207,27 +244,31 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TrackHubTheme {
-                TrackHubApp()
+                TrackHubApp(
+                    sessionViewModel = sessionViewModel
+                )
             }
         }
     }
 }
 
 @Composable
-fun TrackHubApp() {
-    var accessToken by remember { mutableStateOf<String?>(null) }
+fun TrackHubApp(
+    sessionViewModel: SessionViewModel
+) {
+    val accessToken = sessionViewModel.accessToken
 
     if (accessToken == null) {
         AuthScreen(
             onAuthSuccess = { token ->
-                accessToken = token
+                sessionViewModel.saveAccessToken(token)
             }
         )
     } else {
         CatalogScreen(
-            accessToken = accessToken!!,
+            accessToken = accessToken,
             onLogout = {
-                accessToken = null
+                sessionViewModel.clearAccessToken()
             }
         )
     }
