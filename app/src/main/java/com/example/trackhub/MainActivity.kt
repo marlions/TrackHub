@@ -3,7 +3,6 @@ package com.example.trackhub
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.CornerRadius
@@ -19,7 +18,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.content.Context
 import android.net.Uri
@@ -57,18 +55,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -105,10 +97,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.DataOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
+import okhttp3.MediaType
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import java.util.concurrent.TimeUnit
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
@@ -134,6 +133,7 @@ data class Track(
     val streamUrl: String,
     val likesCount: Int,
     val commentsCount: Int,
+    val isLiked: Boolean,
     val createdAt: String,
     val fileSizeBytes: Long,
     val durationSeconds: Int,
@@ -171,6 +171,17 @@ data class FollowUser(
     val id: Int,
     val username: String,
     val followedAt: String
+)
+
+data class LikeResult(
+    val liked: Boolean,
+    val likesCount: Int
+)
+
+data class FollowStatus(
+    val userId: Int,
+    val isFollowing: Boolean,
+    val followersCount: Int
 )
 
 enum class MainTab {
@@ -494,57 +505,6 @@ fun AuthHeader() {
                     )
                 )
         )
-    }
-}
-
-@Composable
-fun TrackHubRecordLogo() {
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(92.dp)
-    ) {
-        val centerX = size.width / 2f
-        val centerY = size.height / 2f
-
-        for (i in 0..5) {
-            drawArc(
-                color = TrackHubGoldLight.copy(alpha = 0.98f - i * 0.08f),
-                startAngle = 198f,
-                sweepAngle = 288f,
-                useCenter = false,
-                topLeft = Offset(centerX - 22f - i * 8f, centerY - 22f - i * 8f),
-                size = Size(44f + i * 16f, 44f + i * 16f),
-                style = Stroke(width = 4.8f, cap = StrokeCap.Round)
-            )
-        }
-
-        drawCircle(color = TrackHubGoldLight, radius = 9.5f, center = Offset(centerX, centerY))
-        drawCircle(color = Color.Black.copy(alpha = 0.88f), radius = 3.2f, center = Offset(centerX, centerY))
-
-        val bars = listOf(12f, 22f, 34f, 48f, 34f, 22f, 12f)
-        bars.forEachIndexed { index, barHeight ->
-            val step = 13f
-            val leftX = centerX - 66f - index * step
-            val rightX = centerX + 66f + index * step
-            val barColor = TrackHubGoldLight.copy(alpha = 0.90f)
-
-            drawLine(
-                color = barColor,
-                start = Offset(leftX, centerY - barHeight / 2f),
-                end = Offset(leftX, centerY + barHeight / 2f),
-                strokeWidth = 4.2f,
-                cap = StrokeCap.Round
-            )
-
-            drawLine(
-                color = barColor,
-                start = Offset(rightX, centerY - barHeight / 2f),
-                end = Offset(rightX, centerY + barHeight / 2f),
-                strokeWidth = 4.2f,
-                cap = StrokeCap.Round
-            )
-        }
     }
 }
 
@@ -1128,6 +1088,7 @@ fun CatalogScreen(
 
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var myTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var likedTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -1147,7 +1108,6 @@ fun CatalogScreen(
     var selectedTrackInfo by remember { mutableStateOf<Track?>(null) }
     var trackPendingDelete by remember { mutableStateOf<Track?>(null) }
     var showPlaylistsScreen by remember { mutableStateOf(false) }
-    var showUploadTrackScreen by remember { mutableStateOf(false) }
     var showProfileScreen by remember { mutableStateOf(false) }
     var showUserSearchScreen by remember { mutableStateOf(false) }
     var showFollowingScreen by remember { mutableStateOf(false) }
@@ -1168,7 +1128,7 @@ fun CatalogScreen(
             errorText = null
 
             try {
-                tracks = fetchTracks(query)
+                tracks = fetchTracks(query, accessToken)
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки треков"
             } finally {
@@ -1192,11 +1152,21 @@ fun CatalogScreen(
         }
     }
 
+    fun loadLikedTracks() {
+        scope.launch {
+            try {
+                likedTracks = fetchLikedTracks(accessToken)
+            } catch (_: Exception) {
+                // Если список лайков временно не загрузился, основной интерфейс продолжает работать.
+            }
+        }
+    }
+
     fun refreshTracksSilently(query: String = searchQuery) {
         scope.launch {
             try {
                 delay(900)
-                val freshTracks = fetchTracks(query)
+                val freshTracks = fetchTracks(query, accessToken)
                 tracks = freshTracks
 
                 currentTrack?.let { playingTrack ->
@@ -1228,7 +1198,25 @@ fun CatalogScreen(
         durationMs = 0L
         isPlaying = true
 
-        refreshTracksSilently()
+        scope.launch {
+            try {
+                val newPlayCount = registerTrackPlay(track.id, accessToken)
+
+                tracks = tracks.map { item ->
+                    if (item.id == track.id) item.copy(playCount = newPlayCount) else item
+                }
+
+                myTracks = myTracks.map { item ->
+                    if (item.id == track.id) item.copy(playCount = newPlayCount) else item
+                }
+
+                currentTrack = currentTrack?.let { item ->
+                    if (item.id == track.id) item.copy(playCount = newPlayCount) else item
+                }
+            } catch (_: Exception) {
+                // Воспроизведение не должно останавливаться, если счётчик прослушиваний временно не обновился.
+            }
+        }
     }
 
     fun togglePlayPause() {
@@ -1254,20 +1242,43 @@ fun CatalogScreen(
         playTrack(tracks[nextIndex])
     }
 
+    fun updateTrackLocally(trackId: Int, transform: (Track) -> Track) {
+        tracks = tracks.map { track ->
+            if (track.id == trackId) transform(track) else track
+        }
+
+        myTracks = myTracks.map { track ->
+            if (track.id == trackId) transform(track) else track
+        }
+
+        currentTrack = currentTrack?.let { track ->
+            if (track.id == trackId) transform(track) else track
+        }
+    }
+
     fun likeAndReload(track: Track) {
         scope.launch {
             errorText = null
 
             try {
-                likeTrack(track.id, accessToken)
+                val likeResult = likeTrack(track.id, accessToken)
 
-                val freshTracks = fetchTracks(searchQuery)
-                tracks = freshTracks
+                updateTrackLocally(track.id) { current ->
+                    current.copy(
+                        likesCount = likeResult.likesCount,
+                        isLiked = likeResult.liked
+                    )
+                }
 
-                currentTrack?.let { playingTrack ->
-                    freshTracks.firstOrNull { it.id == playingTrack.id }?.let { updatedTrack ->
-                        currentTrack = updatedTrack
-                    }
+                if (likeResult.liked) {
+                    val updatedTrack = (tracks + myTracks + listOf(track))
+                        .firstOrNull { it.id == track.id }
+                        ?.copy(likesCount = likeResult.likesCount, isLiked = true)
+                        ?: track.copy(likesCount = likeResult.likesCount, isLiked = true)
+
+                    likedTracks = listOf(updatedTrack) + likedTracks.filterNot { it.id == track.id }
+                } else {
+                    likedTracks = likedTracks.filterNot { it.id == track.id }
                 }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка лайка"
@@ -1282,18 +1293,16 @@ fun CatalogScreen(
             try {
                 deleteTrack(track.id, accessToken)
 
+                tracks = tracks.filterNot { it.id == track.id }
+                myTracks = myTracks.filterNot { it.id == track.id }
+                likedTracks = likedTracks.filterNot { it.id == track.id }
+
                 if (currentTrack?.id == track.id) {
                     player.stop()
                     currentTrack = null
                     isPlaying = false
                     currentPositionMs = 0L
                     durationMs = 0L
-                }
-
-                loadTracks(searchQuery)
-
-                if (libraryInnerScreen == LibraryInnerScreen.MY_TRACKS) {
-                    loadMyTracks()
                 }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка удаления трека"
@@ -1303,6 +1312,7 @@ fun CatalogScreen(
 
     LaunchedEffect(Unit) {
         loadTracks()
+        loadLikedTracks()
     }
 
     LaunchedEffect(currentTrack?.id) {
@@ -1385,25 +1395,6 @@ fun CatalogScreen(
         return
     }
 
-    if (showUploadTrackScreen) {
-        val closeUploadScreen = {
-            showUploadTrackScreen = false
-            loadTracks(searchQuery)
-        }
-
-        BackHandler {
-            closeUploadScreen()
-        }
-
-        UploadTrackScreen(
-            accessToken = accessToken,
-            onBack = closeUploadScreen,
-            onUploadSuccess = {
-                closeUploadScreen()
-            }
-        )
-        return
-    }
 
     if (showUserSearchScreen) {
         BackHandler {
@@ -1441,7 +1432,7 @@ fun CatalogScreen(
         ProfileScreen(
             accessToken = accessToken,
             tracksCount = tracks.size,
-            likedTracksCount = tracks.count { it.likesCount > 0 },
+            likedTracksCount = likedTracks.size,
             onFindUsersClick = {
                 showUserSearchScreen = true
             },
@@ -1469,7 +1460,7 @@ fun CatalogScreen(
             currentPositionMs = currentPositionMs,
             durationMs = durationMs,
             volume = playerVolume,
-            isLiked = track.likesCount > 0,
+            isLiked = track.isLiked,
             onBack = {
                 showFullPlayerScreen = false
             },
@@ -1529,6 +1520,7 @@ fun CatalogScreen(
                     MainTab.HOME -> {
                         HomeTabScreen(
                             tracks = tracks,
+                            likedTracks = likedTracks,
                             isLoading = isLoading,
                             errorText = errorText,
                             onRetry = {
@@ -1602,11 +1594,13 @@ fun CatalogScreen(
                             LibraryInnerScreen.MAIN -> {
                                 LibraryTabScreen(
                                     tracks = tracks,
+                                    likedTracksCount = likedTracks.size,
                                     onPlaylistsClick = {
                                         libraryInnerScreen = LibraryInnerScreen.PLAYLISTS
                                     },
                                     onLikedTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.LIKED_TRACKS
+                                        loadLikedTracks()
                                     },
                                     onMyTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.MY_TRACKS
@@ -1632,7 +1626,7 @@ fun CatalogScreen(
                                     title = "Любимые треки",
                                     subtitle = "Треки, которые получили лайки",
                                     emptyText = "Пока нет любимых треков",
-                                    tracks = tracks.filter { it.likesCount > 0 },
+                                    tracks = likedTracks,
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying,
                                     onBack = {
@@ -1731,8 +1725,9 @@ fun CatalogScreen(
                     MainTab.CREATE -> {
                         CreateTabScreen(
                             accessToken = accessToken,
-                            onUploadSuccess = {
-                                loadTracks(searchQuery)
+                            onUploadSuccess = { uploadedTrack ->
+                                tracks = listOf(uploadedTrack) + tracks
+                                myTracks = listOf(uploadedTrack) + myTracks.filterNot { it.id == uploadedTrack.id }
                             }
                         )
                     }
@@ -2188,6 +2183,7 @@ fun formatFileSize(bytes: Long): String {
 @Composable
 fun HomeTabScreen(
     tracks: List<Track>,
+    likedTracks: List<Track>,
     isLoading: Boolean,
     errorText: String?,
     onRetry: () -> Unit,
@@ -2199,11 +2195,17 @@ fun HomeTabScreen(
     onAddToPlaylistClick: (Track) -> Unit,
     onMoreClick: (Track) -> Unit
 ) {
-    val likedTracks = tracks
-        .filter { it.likesCount > 0 }
-        .take(8)
+    val likedPreviewTracks = remember(likedTracks, tracks) {
+        if (likedTracks.isNotEmpty()) {
+            likedTracks.take(8)
+        } else {
+            tracks.filter { it.isLiked }.take(8)
+        }
+    }
 
-    val recentTracks = tracks.take(8)
+    val recentTracks = remember(tracks) {
+        tracks.take(8)
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -2250,7 +2252,7 @@ fun HomeTabScreen(
 
         item {
             LikedTracksSection(
-                tracks = likedTracks,
+                tracks = likedPreviewTracks,
                 onPlayClick = onPlayClick,
                 onLikeClick = onLikeClick,
                 onCommentsClick = onCommentsClick,
@@ -2318,7 +2320,6 @@ fun ProfileScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        GoldBackgroundDecorations()
 
         LazyColumn(
             modifier = Modifier
@@ -2601,29 +2602,43 @@ fun UserSearchScreen(
             errorText = null
 
             try {
-                if (user.isFollowing) {
+                val status = if (user.isFollowing) {
                     unfollowUser(user.id, accessToken)
                 } else {
                     followUser(user.id, accessToken)
                 }
 
-                users = searchUsers(
-                    accessToken = accessToken,
-                    query = query
-                )
+                users = users.map { item ->
+                    if (item.id == user.id) {
+                        item.copy(
+                            isFollowing = status.isFollowing,
+                            followersCount = status.followersCount
+                        )
+                    } else {
+                        item
+                    }
+                }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка изменения подписки"
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        loadUsers("")
-    }
-
     LaunchedEffect(query) {
         delay(350)
-        loadUsers(query)
+        isLoading = true
+        errorText = null
+
+        try {
+            users = searchUsers(
+                accessToken = accessToken,
+                query = query
+            )
+        } catch (e: Exception) {
+            errorText = e.message ?: "Ошибка поиска пользователей"
+        } finally {
+            isLoading = false
+        }
     }
 
     Box(
@@ -2631,7 +2646,6 @@ fun UserSearchScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        GoldBackgroundDecorations()
 
         LazyColumn(
             modifier = Modifier
@@ -2704,7 +2718,7 @@ fun UserSearchScreen(
                 }
             }
 
-            items(users) { user ->
+            items(items = users, key = { it.id }) { user ->
                 UserPublicCard(
                     user = user,
                     onFollowClick = {
@@ -2752,7 +2766,7 @@ fun FollowingScreen(
 
             try {
                 unfollowUser(user.id, accessToken)
-                following = fetchMyFollowing(accessToken)
+                following = following.filterNot { it.id == user.id }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка отписки"
             }
@@ -2768,7 +2782,6 @@ fun FollowingScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        GoldBackgroundDecorations()
 
         LazyColumn(
             modifier = Modifier
@@ -2837,7 +2850,7 @@ fun FollowingScreen(
                 }
             }
 
-            items(following) { user ->
+            items(items = following, key = { it.id }) { user ->
                 FollowingUserCard(
                     user = user,
                     onUnfollowClick = {
@@ -3515,51 +3528,6 @@ fun HomeSmallTrackCard(
 }
 
 @Composable
-fun RecentTrackCard(
-    track: Track,
-    onPlayClick: () -> Unit,
-    onLikeClick: () -> Unit,
-    onCommentsClick: () -> Unit,
-    onAddToPlaylistClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(132.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF121212))
-            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(12.dp))
-            .clickable(onClick = onPlayClick)
-            .padding(10.dp)
-    ) {
-        TrackCoverPlaceholder(
-            track = track,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(112.dp)
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Text(
-            text = track.title,
-            color = TrackHubText,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = track.author,
-            color = TrackHubMutedText,
-            fontSize = 13.sp,
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
 fun RecentlyAddedWideTrackCard(
     track: Track,
     onPlayClick: () -> Unit,
@@ -3626,12 +3594,14 @@ fun TrackCoverPlaceholder(
     track: Track,
     modifier: Modifier = Modifier
 ) {
-    val colors = when (track.id % 5) {
-        0 -> listOf(Color(0xFF3A0A0A), Color(0xFFD99B00))
-        1 -> listOf(Color(0xFF111111), Color(0xFF6A1111))
-        2 -> listOf(Color(0xFF1B1B1B), Color(0xFF444444))
-        3 -> listOf(Color(0xFF101020), Color(0xFFB7860B))
-        else -> listOf(Color(0xFF080808), Color(0xFF322000))
+    val colors = remember(track.id) {
+        when (track.id % 5) {
+            0 -> listOf(Color(0xFF3A0A0A), Color(0xFFD99B00))
+            1 -> listOf(Color(0xFF111111), Color(0xFF6A1111))
+            2 -> listOf(Color(0xFF1B1B1B), Color(0xFF444444))
+            3 -> listOf(Color(0xFF101020), Color(0xFFB7860B))
+            else -> listOf(Color(0xFF080808), Color(0xFF322000))
+        }
     }
 
     Box(
@@ -4370,7 +4340,6 @@ fun TrackHubCompactSlider(
     thumbRadius: Dp = 5.dp,
     onValueChangeFinished: (() -> Unit)? = null
 ) {
-    val density = LocalDensity.current
     var widthPx by remember { mutableStateOf(1) }
 
     val minValue = valueRange.start
@@ -4708,7 +4677,7 @@ fun SearchTabScreen(
             }
         }
 
-        items(tracks) { track ->
+        items(items = tracks, key = { it.id }) { track ->
             SearchTrackResultCard(
                 track = track,
                 isCurrentTrack = currentTrack?.id == track.id,
@@ -4914,11 +4883,14 @@ fun EmptySearchResultCard(
 @Composable
 fun LibraryTabScreen(
     tracks: List<Track>,
+    likedTracksCount: Int,
     onPlaylistsClick: () -> Unit,
     onLikedTracksClick: () -> Unit,
     onMyTracksClick: () -> Unit,
     onAllTracksClick: () -> Unit
 ) {
+    val allTracksCount = tracks.size
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -4947,7 +4919,7 @@ fun LibraryTabScreen(
         item {
             LibraryActionCard(
                 title = "Любимые треки",
-                subtitle = "Треков с лайками: ${tracks.count { it.likesCount > 0 }}",
+                subtitle = "Треков с лайками: $likedTracksCount",
                 iconText = "likes",
                 onClick = onLikedTracksClick
             )
@@ -4965,7 +4937,7 @@ fun LibraryTabScreen(
         item {
             LibraryActionCard(
                 title = "Все треки",
-                subtitle = "Всего треков: ${tracks.size}",
+                subtitle = "Всего треков: $allTracksCount",
                 iconText = "tracks",
                 onClick = onAllTracksClick
             )
@@ -5041,7 +5013,7 @@ fun LibraryTracksListScreen(
             }
         }
 
-        items(tracks) { track ->
+        items(items = tracks, key = { it.id }) { track ->
             SearchTrackResultCard(
                 track = track,
                 isCurrentTrack = currentTrack?.id == track.id,
@@ -5104,7 +5076,7 @@ fun EmptyLibraryTracksCard(
 @Composable
 fun CreateTabScreen(
     accessToken: String,
-    onUploadSuccess: () -> Unit
+    onUploadSuccess: (Track) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -5284,7 +5256,7 @@ fun CreateTabScreen(
                             successText = null
 
                             try {
-                                uploadTrack(
+                                val uploadedTrack = uploadTrack(
                                     context = context,
                                     title = trimmedTitle,
                                     author = trimmedAuthor,
@@ -5298,7 +5270,7 @@ fun CreateTabScreen(
                                 selectedFileName = null
                                 successText = "Трек успешно загружен"
 
-                                onUploadSuccess()
+                                onUploadSuccess(uploadedTrack)
                             } catch (e: Exception) {
                                 errorText = e.message ?: "Ошибка загрузки трека"
                             } finally {
@@ -5473,7 +5445,7 @@ fun AudioFilePickerCard(
             Spacer(modifier = Modifier.height(3.dp))
 
             Text(
-                text = "MP3, WAV или другой audio-файл",
+                text = "MP3 или WAV аудиофайл",
                 color = TrackHubMutedText.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 lineHeight = 15.sp,
@@ -5530,86 +5502,6 @@ fun CreatePlaylistHintCard() {
                 fontSize = 13.sp,
                 lineHeight = 17.sp
             )
-        }
-    }
-}
-
-@Composable
-fun DarkTrackListCard(
-    track: Track,
-    onPlayClick: () -> Unit,
-    onLikeClick: () -> Unit,
-    onCommentsClick: () -> Unit,
-    onAddToPlaylistClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF111111))
-            .border(1.dp, Color(0x33FFC84D), RoundedCornerShape(14.dp))
-            .padding(12.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TrackCoverPlaceholder(
-                track = track,
-                modifier = Modifier.size(58.dp)
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = track.title,
-                    color = TrackHubText,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1
-                )
-
-                Text(
-                    text = track.author,
-                    color = TrackHubMutedText,
-                    fontSize = 14.sp,
-                    maxLines = 1
-                )
-
-                Text(
-                    text = "Лайков: ${track.likesCount} · Комментариев: ${track.commentsCount}",
-                    color = TrackHubMutedText,
-                    fontSize = 12.sp,
-                    maxLines = 1
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(TrackHubGold)
-                    .clickable(onClick = onPlayClick),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "▶",
-                    color = Color.White,
-                    fontSize = 18.sp
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            DarkSmallButton("Лайк", onLikeClick)
-            DarkSmallButton("Комментарии", onCommentsClick)
-            DarkSmallButton("В плейлист", onAddToPlaylistClick)
         }
     }
 }
@@ -6061,79 +5953,6 @@ fun BottomNavIcon(
 }
 
 @Composable
-fun TrackCard(
-    track: Track,
-    onPlayClick: () -> Unit,
-    onLikeClick: () -> Unit,
-    onCommentsClick: () -> Unit,
-    onAddToPlaylistClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            Text(
-                text = track.author,
-                style = MaterialTheme.typography.bodyMedium
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Лайков: ${track.likesCount} · Комментариев: ${track.commentsCount}",
-                style = MaterialTheme.typography.bodySmall
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = onPlayClick
-                    ) {
-                        Text("Play")
-                    }
-
-                    Button(
-                        onClick = onLikeClick
-                    ) {
-                        Text("Лайк")
-                    }
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = onCommentsClick
-                    ) {
-                        Text("Комментарии")
-                    }
-
-                    Button(
-                        onClick = onAddToPlaylistClick
-                    ) {
-                        Text("В плейлист")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun CommentsScreen(
     track: Track,
     accessToken: String,
@@ -6171,7 +5990,6 @@ fun CommentsScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        GoldBackgroundDecorations()
 
         LazyColumn(
             modifier = Modifier
@@ -6318,7 +6136,7 @@ fun CommentsScreen(
                 }
             }
 
-            items(comments) { comment ->
+            items(items = comments, key = { it.id }) { comment ->
                 CommentCard(comment = comment)
             }
 
@@ -6617,7 +6435,6 @@ fun AddToPlaylistScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        GoldBackgroundDecorations()
 
         LazyColumn(
             modifier = Modifier
@@ -6691,9 +6508,9 @@ fun AddToPlaylistScreen(
                                     successText = null
 
                                     try {
-                                        createPlaylist(trimmedName, accessToken)
+                                        val createdPlaylist = createPlaylist(trimmedName, accessToken)
                                         playlistName = ""
-                                        playlists = fetchPlaylists(accessToken)
+                                        playlists = listOf(createdPlaylist) + playlists
                                         successText = "Плейлист создан"
                                     } catch (e: Exception) {
                                         errorText = e.message ?: "Ошибка создания плейлиста"
@@ -6755,7 +6572,7 @@ fun AddToPlaylistScreen(
                 }
             }
 
-            items(playlists) { playlist ->
+            items(items = playlists, key = { it.id }) { playlist ->
                 AddToPlaylistCard(
                     playlist = playlist,
                     enabled = !isLoading,
@@ -6772,7 +6589,13 @@ fun AddToPlaylistScreen(
                                     accessToken = accessToken
                                 )
 
-                                playlists = fetchPlaylists(accessToken)
+                                playlists = playlists.map { item ->
+                                    if (item.id == playlist.id) {
+                                        item.copy(tracksCount = item.tracksCount + 1)
+                                    } else {
+                                        item
+                                    }
+                                }
                                 successText = "Трек добавлен в плейлист «${playlist.name}»"
                             } catch (e: Exception) {
                                 errorText = e.message ?: "Ошибка добавления в плейлист"
@@ -7060,8 +6883,14 @@ fun PlaylistsScreen(
                     accessToken = accessToken
                 )
 
-                playlistTracks = fetchPlaylistTracks(playlist.id, accessToken)
-                playlists = fetchPlaylists(accessToken)
+                playlistTracks = playlistTracks.filterNot { it.id == track.id }
+                playlists = playlists.map { item ->
+                    if (item.id == playlist.id) {
+                        item.copy(tracksCount = (item.tracksCount - 1).coerceAtLeast(0))
+                    } else {
+                        item
+                    }
+                }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка удаления трека из плейлиста"
             } finally {
@@ -7083,7 +6912,7 @@ fun PlaylistsScreen(
                     playlistTracks = emptyList()
                 }
 
-                playlists = fetchPlaylists(accessToken)
+                playlists = playlists.filterNot { it.id == playlist.id }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка удаления плейлиста"
             } finally {
@@ -7103,13 +6932,11 @@ fun PlaylistsScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        GoldBackgroundDecorations()
 
         if (currentPlaylist != null) {
             BackHandler {
                 selectedPlaylist = null
                 playlistTracks = emptyList()
-                loadPlaylists()
             }
 
             LazyColumn(
@@ -7125,7 +6952,6 @@ fun PlaylistsScreen(
                         onClick = {
                             selectedPlaylist = null
                             playlistTracks = emptyList()
-                            loadPlaylists()
                         }
                     )
                 }
@@ -7176,7 +7002,7 @@ fun PlaylistsScreen(
                     }
                 }
 
-                items(playlistTracks) { track ->
+                items(items = playlistTracks, key = { it.id }) { track ->
                     PlaylistTrackCard(
                         track = track,
                         onMoreClick = {
@@ -7258,9 +7084,9 @@ fun PlaylistsScreen(
                                     errorText = null
 
                                     try {
-                                        createPlaylist(trimmedName, accessToken)
+                                        val createdPlaylist = createPlaylist(trimmedName, accessToken)
                                         playlistName = ""
-                                        playlists = fetchPlaylists(accessToken)
+                                        playlists = listOf(createdPlaylist) + playlists
                                     } catch (e: Exception) {
                                         errorText = e.message ?: "Ошибка создания плейлиста"
                                     } finally {
@@ -7311,7 +7137,7 @@ fun PlaylistsScreen(
                     }
                 }
 
-                items(playlists) { playlist ->
+                items(items = playlists, key = { it.id }) { playlist ->
                     PlaylistCard(
                         playlist = playlist,
                         onClick = {
@@ -7817,184 +7643,6 @@ fun TrackHubErrorText(
     )
 }
 
-@Composable
-fun UploadTrackScreen(
-    accessToken: String,
-    onBack: () -> Unit,
-    onUploadSuccess: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    var title by remember { mutableStateOf("") }
-    var author by remember { mutableStateOf("") }
-    var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedFileName by remember { mutableStateOf<String?>(null) }
-
-    var isLoading by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
-    var successText by remember { mutableStateOf<String?>(null) }
-
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        selectedFileUri = uri
-        selectedFileName = uri?.let { getFileName(context, it) }
-        errorText = null
-        successText = null
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        TextButton(
-            onClick = onBack
-        ) {
-            Text("← Назад")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "Загрузка трека",
-            style = MaterialTheme.typography.headlineSmall
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = title,
-            onValueChange = { title = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Название трека") },
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = author,
-            onValueChange = { author = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Автор") },
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Button(
-            onClick = {
-                filePickerLauncher.launch("audio/*")
-            },
-            enabled = !isLoading
-        ) {
-            Text("Выбрать аудиофайл")
-        }
-
-        selectedFileName?.let {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Выбран файл: $it",
-                style = MaterialTheme.typography.bodyMedium
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = uploadButton@{
-                val trimmedTitle = title.trim()
-                val trimmedAuthor = author.trim()
-                val fileUri = selectedFileUri
-
-                errorText = null
-                successText = null
-
-                if (trimmedTitle.isBlank()) {
-                    errorText = "Введите название трека"
-                    return@uploadButton
-                }
-
-                if (trimmedTitle.length > 100) {
-                    errorText = "Название трека должно быть не длиннее 100 символов"
-                    return@uploadButton
-                }
-
-                if (trimmedAuthor.isBlank()) {
-                    errorText = "Введите автора трека"
-                    return@uploadButton
-                }
-
-                if (trimmedAuthor.length > 50) {
-                    errorText = "Автор должен быть не длиннее 50 символов"
-                    return@uploadButton
-                }
-
-                if (fileUri == null) {
-                    errorText = "Выберите аудиофайл"
-                    return@uploadButton
-                }
-
-                scope.launch {
-                    isLoading = true
-                    errorText = null
-                    successText = null
-
-                    try {
-                        uploadTrack(
-                            context = context,
-                            title = trimmedTitle,
-                            author = trimmedAuthor,
-                            fileUri = fileUri,
-                            accessToken = accessToken
-                        )
-
-                        successText = "Трек успешно загружен"
-                        title = ""
-                        author = ""
-                        selectedFileUri = null
-                        selectedFileName = null
-
-                        onUploadSuccess()
-                    } catch (e: Exception) {
-                        errorText = e.message ?: "Ошибка загрузки трека"
-                    } finally {
-                        isLoading = false
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading
-        ) {
-            Text("Загрузить")
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (isLoading) {
-            CircularProgressIndicator()
-        }
-
-        successText?.let {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-
-        errorText?.let {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Ошибка: $it",
-                color = MaterialTheme.colorScheme.error
-            )
-        }
-    }
-}
-
 suspend fun loginUser(
     email: String,
     password: String
@@ -8019,247 +7667,246 @@ suspend fun registerUser(
     return authRequest("/api/auth/register", body)
 }
 
+private val TrackHubJsonMediaType = "application/json; charset=utf-8".toMediaType()
+private val TrackHubEmptyRequestBody = ByteArray(0).toRequestBody(null)
+
+private val TrackHubHttpClient: OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(5, TimeUnit.SECONDS)
+    .readTimeout(15, TimeUnit.SECONDS)
+    .writeTimeout(30, TimeUnit.SECONDS)
+    .callTimeout(35, TimeUnit.SECONDS)
+    .retryOnConnectionFailure(true)
+    .build()
+
+private fun Request.Builder.acceptJson(): Request.Builder = apply {
+    header("Accept", "application/json")
+}
+
+private fun Request.Builder.bearerToken(accessToken: String): Request.Builder = apply {
+    header("Authorization", "Bearer $accessToken")
+}
+
+private suspend fun executeRequest(request: Request): String {
+    return withContext(Dispatchers.IO) {
+        TrackHubHttpClient.newCall(request).execute().use { response ->
+            val responseText = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                throw RuntimeException("Backend вернул код ${response.code}: $responseText")
+            }
+
+            responseText
+        }
+    }
+}
+
+private fun jsonRequestBody(body: JSONObject): RequestBody {
+    return body.toString().toRequestBody(TrackHubJsonMediaType)
+}
+
+private fun buildUrl(
+    path: String,
+    queryParams: Map<String, String> = emptyMap()
+): String {
+    val builder = (BASE_URL + path).toHttpUrl().newBuilder()
+
+    queryParams.forEach { (name, value) ->
+        builder.addQueryParameter(name, value)
+    }
+
+    return builder.build().toString()
+}
+
+private fun parseTrack(item: JSONObject): Track {
+    return Track(
+        id = item.getInt("id"),
+        title = item.getString("title"),
+        author = item.getString("author"),
+        streamUrl = item.getString("stream_url"),
+        likesCount = item.optInt("likes_count", 0),
+        commentsCount = item.optInt("comments_count", 0),
+        isLiked = item.optBoolean("is_liked", false),
+        createdAt = item.optString("created_at", ""),
+        fileSizeBytes = item.optLong("file_size_bytes", 0L),
+        durationSeconds = item.optInt("duration_seconds", 0),
+        playCount = item.optInt("play_count", 0)
+    )
+}
+
+private fun parseTracks(responseText: String): List<Track> {
+    val jsonArray = JSONArray(responseText)
+    val result = ArrayList<Track>(jsonArray.length())
+
+    for (i in 0 until jsonArray.length()) {
+        result.add(parseTrack(jsonArray.getJSONObject(i)))
+    }
+
+    return result
+}
+
+private fun parsePlaylist(item: JSONObject): Playlist {
+    return Playlist(
+        id = item.getInt("id"),
+        name = item.getString("name"),
+        tracksCount = item.optInt("tracks_count", 0)
+    )
+}
+
+private fun parsePlaylists(responseText: String): List<Playlist> {
+    val jsonArray = JSONArray(responseText)
+    val result = ArrayList<Playlist>(jsonArray.length())
+
+    for (i in 0 until jsonArray.length()) {
+        result.add(parsePlaylist(jsonArray.getJSONObject(i)))
+    }
+
+    return result
+}
+
 suspend fun fetchCurrentUser(
     accessToken: String
 ): UserProfile {
-    return withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/auth/me")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/auth/me"))
+        .get()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
+    val item = JSONObject(executeRequest(request))
 
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val item = JSONObject(responseText)
-
-            UserProfile(
-                id = item.getInt("id"),
-                username = item.getString("username"),
-                email = item.getString("email")
-            )
-        } finally {
-            connection.disconnect()
-        }
-    }
+    return UserProfile(
+        id = item.getInt("id"),
+        username = item.getString("username"),
+        email = item.getString("email")
+    )
 }
 
 suspend fun authRequest(
     path: String,
     body: JSONObject
 ): String {
-    return withContext(Dispatchers.IO) {
-        val url = URL(BASE_URL + path)
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl(path))
+        .post(jsonRequestBody(body))
+        .acceptJson()
+        .build()
 
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.doOutput = true
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "application/json")
-
-            connection.outputStream.use { output ->
-                output.write(body.toString().toByteArray(Charsets.UTF_8))
-            }
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val json = JSONObject(responseText)
-            json.getString("access_token")
-        } finally {
-            connection.disconnect()
-        }
-    }
+    val json = JSONObject(executeRequest(request))
+    return json.getString("access_token")
 }
 
-suspend fun fetchTracks(query: String): List<Track> {
-    return withContext(Dispatchers.IO) {
-        val endpoint = if (query.isBlank()) {
-            "$BASE_URL/api/tracks"
-        } else {
-            val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            "$BASE_URL/api/tracks/search?query=$encodedQuery"
-        }
-
-        val url = URL(endpoint)
-        val connection = url.openConnection() as HttpURLConnection
-
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val jsonArray = JSONArray(responseText)
-            val result = mutableListOf<Track>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-
-                result.add(
-                    Track(
-                        id = item.getInt("id"),
-                        title = item.getString("title"),
-                        author = item.getString("author"),
-                        streamUrl = item.getString("stream_url"),
-                        likesCount = item.optInt("likes_count", 0),
-                        commentsCount = item.optInt("comments_count", 0),
-                        createdAt = item.optString("created_at", ""),
-                        fileSizeBytes = item.optLong("file_size_bytes", 0L),
-                        durationSeconds = item.optInt("duration_seconds", 0),
-                        playCount = item.optInt("play_count", 0)
-                    )
-                )
-            }
-
-            result
-        } finally {
-            connection.disconnect()
-        }
+suspend fun fetchTracks(
+    query: String,
+    accessToken: String? = null
+): List<Track> {
+    val url = if (query.isBlank()) {
+        buildUrl("/api/tracks")
+    } else {
+        buildUrl(
+            path = "/api/tracks/search",
+            queryParams = mapOf("query" to query)
+        )
     }
+
+    val builder = Request.Builder()
+        .url(url)
+        .get()
+        .acceptJson()
+
+    if (accessToken != null) {
+        builder.bearerToken(accessToken)
+    }
+
+    return parseTracks(executeRequest(builder.build()))
 }
 
 suspend fun fetchMyTracks(
     accessToken: String
 ): List<Track> {
-    return withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/tracks/my")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/my"))
+        .get()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
+    return parseTracks(executeRequest(request))
+}
 
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
+suspend fun fetchLikedTracks(
+    accessToken: String
+): List<Track> {
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/liked"))
+        .get()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val jsonArray = JSONArray(responseText)
-            val result = mutableListOf<Track>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-
-                result.add(
-                    Track(
-                        id = item.getInt("id"),
-                        title = item.getString("title"),
-                        author = item.getString("author"),
-                        streamUrl = item.getString("stream_url"),
-                        likesCount = item.optInt("likes_count", 0),
-                        commentsCount = item.optInt("comments_count", 0),
-                        createdAt = item.optString("created_at", ""),
-                        fileSizeBytes = item.optLong("file_size_bytes", 0L),
-                        durationSeconds = item.optInt("duration_seconds", 0),
-                        playCount = item.optInt("play_count", 0)
-                    )
-                )
-            }
-
-            result
-        } finally {
-            connection.disconnect()
-        }
-    }
+    return parseTracks(executeRequest(request))
 }
 
 suspend fun likeTrack(
     trackId: Int,
     accessToken: String
-) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/tracks/$trackId/like")
-        val connection = url.openConnection() as HttpURLConnection
+): LikeResult {
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/$trackId/like"))
+        .post(TrackHubEmptyRequestBody)
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
+    val item = JSONObject(executeRequest(request))
 
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
+    return LikeResult(
+        liked = item.optBoolean("liked", false),
+        likesCount = item.optInt("likes_count", 0)
+    )
+}
 
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+suspend fun registerTrackPlay(
+    trackId: Int,
+    accessToken: String
+): Int {
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/$trackId/play"))
+        .post(TrackHubEmptyRequestBody)
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
+
+    val item = JSONObject(executeRequest(request))
+    return item.optInt("play_count", 0)
 }
 
 suspend fun fetchComments(
     trackId: Int
 ): List<TrackComment> {
-    return withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/tracks/$trackId/comments")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/$trackId/comments"))
+        .get()
+        .acceptJson()
+        .build()
 
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Accept", "application/json")
+    val jsonArray = JSONArray(executeRequest(request))
+    val result = ArrayList<TrackComment>(jsonArray.length())
 
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
+    for (i in 0 until jsonArray.length()) {
+        val item = jsonArray.getJSONObject(i)
 
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val jsonArray = JSONArray(responseText)
-            val result = mutableListOf<TrackComment>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-
-                result.add(
-                    TrackComment(
-                        id = item.getInt("id"),
-                        text = item.getString("text"),
-                        username = item.optString("username", "Пользователь"),
-                        createdAt = item.optString("created_at", "")
-                    )
-                )
-            }
-
-            result
-        } finally {
-            connection.disconnect()
-        }
+        result.add(
+            TrackComment(
+                id = item.getInt("id"),
+                text = item.getString("text"),
+                username = item.optString("username", "Пользователь"),
+                createdAt = item.optString("created_at", "")
+            )
+        )
     }
+
+    return result
 }
 
 suspend fun addComment(
@@ -8267,123 +7914,47 @@ suspend fun addComment(
     text: String,
     accessToken: String
 ) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/tracks/$trackId/comments")
-        val connection = url.openConnection() as HttpURLConnection
+    val body = JSONObject()
+        .put("text", text)
 
-        val body = JSONObject()
-            .put("text", text)
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/$trackId/comments"))
+        .post(jsonRequestBody(body))
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "application/json")
-
-            connection.outputStream.use { output ->
-                output.write(body.toString().toByteArray(Charsets.UTF_8))
-            }
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    executeRequest(request)
 }
 
 suspend fun fetchPlaylists(
     accessToken: String
 ): List<Playlist> {
-    return withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/playlists")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/playlists"))
+        .get()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val jsonArray = JSONArray(responseText)
-            val result = mutableListOf<Playlist>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-
-                result.add(
-                    Playlist(
-                        id = item.getInt("id"),
-                        name = item.getString("name"),
-                        tracksCount = item.optInt("tracks_count", 0)
-                    )
-                )
-            }
-
-            result
-        } finally {
-            connection.disconnect()
-        }
-    }
+    return parsePlaylists(executeRequest(request))
 }
 
 suspend fun createPlaylist(
     name: String,
     accessToken: String
 ): Playlist {
-    return withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/playlists")
-        val connection = url.openConnection() as HttpURLConnection
+    val body = JSONObject()
+        .put("name", name)
 
-        val body = JSONObject()
-            .put("name", name)
+    val request = Request.Builder()
+        .url(buildUrl("/api/playlists"))
+        .post(jsonRequestBody(body))
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.setRequestProperty("Accept", "application/json")
-
-            connection.outputStream.use { output ->
-                output.write(body.toString().toByteArray(Charsets.UTF_8))
-            }
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val item = JSONObject(responseText)
-
-            Playlist(
-                id = item.getInt("id"),
-                name = item.getString("name"),
-                tracksCount = item.optInt("tracks_count", 0)
-            )
-        } finally {
-            connection.disconnect()
-        }
-    }
+    return parsePlaylist(JSONObject(executeRequest(request)))
 }
 
 suspend fun addTrackToPlaylist(
@@ -8391,81 +7962,42 @@ suspend fun addTrackToPlaylist(
     trackId: Int,
     accessToken: String
 ) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/playlists/$playlistId/tracks/$trackId")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/playlists/$playlistId/tracks/$trackId"))
+        .post(TrackHubEmptyRequestBody)
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    executeRequest(request)
 }
 
 suspend fun deleteTrack(
     trackId: Int,
     accessToken: String
 ) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/tracks/$trackId")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/$trackId"))
+        .delete()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "DELETE"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-
-            if (responseCode !in 200..299) {
-                val responseText = readResponseText(connection)
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    executeRequest(request)
 }
 
 suspend fun deletePlaylist(
     playlistId: Int,
     accessToken: String
 ) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/playlists/$playlistId")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/playlists/$playlistId"))
+        .delete()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "DELETE"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-
-            if (responseCode !in 200..299) {
-                val responseText = readResponseText(connection)
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    executeRequest(request)
 }
 
 suspend fun removeTrackFromPlaylist(
@@ -8473,225 +8005,140 @@ suspend fun removeTrackFromPlaylist(
     trackId: Int,
     accessToken: String
 ) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/playlists/$playlistId/tracks/$trackId")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/playlists/$playlistId/tracks/$trackId"))
+        .delete()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "DELETE"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-
-            if (responseCode !in 200..299) {
-                val responseText = readResponseText(connection)
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+    executeRequest(request)
 }
 
 suspend fun fetchPlaylistTracks(
     playlistId: Int,
     accessToken: String
 ): List<Track> {
-    return withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/playlists/$playlistId/tracks")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/playlists/$playlistId/tracks"))
+        .get()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val jsonArray = JSONArray(responseText)
-            val result = mutableListOf<Track>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-
-                result.add(
-                    Track(
-                        id = item.getInt("id"),
-                        title = item.getString("title"),
-                        author = item.getString("author"),
-                        streamUrl = item.getString("stream_url"),
-                        likesCount = item.optInt("likes_count", 0),
-                        commentsCount = item.optInt("comments_count", 0),
-                        createdAt = item.optString("created_at", ""),
-                        fileSizeBytes = item.optLong("file_size_bytes", 0L),
-                        durationSeconds = item.optInt("duration_seconds", 0),
-                        playCount = item.optInt("play_count", 0)
-                    )
-                )
-            }
-
-            result
-        } finally {
-            connection.disconnect()
-        }
-    }
+    return parseTracks(executeRequest(request))
 }
-
 
 suspend fun searchUsers(
     accessToken: String,
     query: String
 ): List<UserPublic> {
-    return withContext(Dispatchers.IO) {
-        val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val url = URL("$BASE_URL/api/users/search?query=$encodedQuery")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(
+            buildUrl(
+                path = "/api/users/search",
+                queryParams = mapOf("query" to query)
+            )
+        )
+        .get()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
+    val jsonArray = JSONArray(executeRequest(request))
+    val result = ArrayList<UserPublic>(jsonArray.length())
 
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
+    for (i in 0 until jsonArray.length()) {
+        val item = jsonArray.getJSONObject(i)
 
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val jsonArray = JSONArray(responseText)
-            val result = mutableListOf<UserPublic>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-
-                result.add(
-                    UserPublic(
-                        id = item.getInt("id"),
-                        username = item.getString("username"),
-                        isFollowing = item.optBoolean("is_following", false),
-                        followersCount = item.optInt("followers_count", 0),
-                        followingCount = item.optInt("following_count", 0)
-                    )
-                )
-            }
-
-            result
-        } finally {
-            connection.disconnect()
-        }
+        result.add(
+            UserPublic(
+                id = item.getInt("id"),
+                username = item.getString("username"),
+                isFollowing = item.optBoolean("is_following", false),
+                followersCount = item.optInt("followers_count", 0),
+                followingCount = item.optInt("following_count", 0)
+            )
+        )
     }
+
+    return result
 }
 
 suspend fun fetchMyFollowing(
     accessToken: String
 ): List<FollowUser> {
-    return withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/users/me/following")
-        val connection = url.openConnection() as HttpURLConnection
+    val request = Request.Builder()
+        .url(buildUrl("/api/users/me/following"))
+        .get()
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-        try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
+    val jsonArray = JSONArray(executeRequest(request))
+    val result = ArrayList<FollowUser>(jsonArray.length())
 
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
+    for (i in 0 until jsonArray.length()) {
+        val item = jsonArray.getJSONObject(i)
 
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val jsonArray = JSONArray(responseText)
-            val result = mutableListOf<FollowUser>()
-
-            for (i in 0 until jsonArray.length()) {
-                val item = jsonArray.getJSONObject(i)
-
-                result.add(
-                    FollowUser(
-                        id = item.getInt("id"),
-                        username = item.getString("username"),
-                        followedAt = item.optString("followed_at", "")
-                    )
-                )
-            }
-
-            result
-        } finally {
-            connection.disconnect()
-        }
+        result.add(
+            FollowUser(
+                id = item.getInt("id"),
+                username = item.getString("username"),
+                followedAt = item.optString("followed_at", "")
+            )
+        )
     }
+
+    return result
 }
 
 suspend fun followUser(
     userId: Int,
     accessToken: String
-) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/users/$userId/follow")
-        val connection = url.openConnection() as HttpURLConnection
-
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-
-            if (responseCode !in 200..299) {
-                val responseText = readResponseText(connection)
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+): FollowStatus {
+    return followRequest(
+        userId = userId,
+        accessToken = accessToken,
+        method = "POST"
+    )
 }
 
 suspend fun unfollowUser(
     userId: Int,
     accessToken: String
-) {
-    withContext(Dispatchers.IO) {
-        val url = URL("$BASE_URL/api/users/$userId/follow")
-        val connection = url.openConnection() as HttpURLConnection
-
-        try {
-            connection.requestMethod = "DELETE"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-
-            val responseCode = connection.responseCode
-
-            if (responseCode !in 200..299) {
-                val responseText = readResponseText(connection)
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
+): FollowStatus {
+    return followRequest(
+        userId = userId,
+        accessToken = accessToken,
+        method = "DELETE"
+    )
 }
 
+suspend fun followRequest(
+    userId: Int,
+    accessToken: String,
+    method: String
+): FollowStatus {
+    val builder = Request.Builder()
+        .url(buildUrl("/api/users/$userId/follow"))
+        .acceptJson()
+        .bearerToken(accessToken)
+
+    val request = when (method) {
+        "POST" -> builder.post(TrackHubEmptyRequestBody).build()
+        "DELETE" -> builder.delete().build()
+        else -> throw IllegalArgumentException("Unsupported follow method: $method")
+    }
+
+    val item = JSONObject(executeRequest(request))
+
+    return FollowStatus(
+        userId = item.optInt("user_id", userId),
+        isFollowing = item.optBoolean("is_following", method == "POST"),
+        followersCount = item.optInt("followers_count", 0)
+    )
+}
 
 suspend fun uploadTrack(
     context: Context,
@@ -8700,105 +8147,73 @@ suspend fun uploadTrack(
     fileUri: Uri,
     accessToken: String
 ): Track {
-    return withContext(Dispatchers.IO) {
-        val boundary = "TrackHubBoundary${System.currentTimeMillis()}"
-        val url = URL("$BASE_URL/api/tracks/upload")
-        val connection = url.openConnection() as HttpURLConnection
+    val fileName = getFileName(context, fileUri).replace("\"", "")
+    val contentType = context.contentResolver.getType(fileUri) ?: "audio/mpeg"
 
-        try {
-            connection.requestMethod = "POST"
-            connection.connectTimeout = 15000
-            connection.readTimeout = 30000
-            connection.doOutput = true
-            connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty(
-                "Content-Type",
-                "multipart/form-data; boundary=$boundary"
-            )
+    val fileRequestBody = UriRequestBody(
+        context = context,
+        uri = fileUri,
+        mediaType = contentType
+    )
 
-            val fileName = getFileName(context, fileUri).replace("\"", "")
-            val contentType = context.contentResolver.getType(fileUri) ?: "audio/mpeg"
+    val multipartBody = MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart("title", title)
+        .addFormDataPart("author", author)
+        .addFormDataPart("file", fileName, fileRequestBody)
+        .build()
 
-            DataOutputStream(connection.outputStream).use { output ->
-                writeFormField(
-                    output = output,
-                    boundary = boundary,
-                    name = "title",
-                    value = title
-                )
+    val request = Request.Builder()
+        .url(buildUrl("/api/tracks/upload"))
+        .post(multipartBody)
+        .acceptJson()
+        .bearerToken(accessToken)
+        .build()
 
-                writeFormField(
-                    output = output,
-                    boundary = boundary,
-                    name = "author",
-                    value = author
-                )
+    return parseTrack(JSONObject(executeRequest(request)))
+}
 
-                output.writeBytes("--$boundary\r\n")
-                output.writeBytes(
-                    "Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n"
-                )
-                output.writeBytes("Content-Type: $contentType\r\n")
-                output.writeBytes("\r\n")
+private class UriRequestBody(
+    private val context: Context,
+    private val uri: Uri,
+    private val mediaType: String
+) : RequestBody() {
+    override fun contentType(): MediaType? {
+        return mediaType.toMediaTypeOrNull()
+    }
 
-                context.contentResolver.openInputStream(fileUri)?.use { input ->
-                    val buffer = ByteArray(8192)
+    override fun contentLength(): Long {
+        return getContentLength(context, uri)
+    }
 
-                    while (true) {
-                        val bytesRead = input.read(buffer)
+    override fun writeTo(sink: BufferedSink) {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(64 * 1024)
 
-                        if (bytesRead == -1) {
-                            break
-                        }
+            while (true) {
+                val bytesRead = input.read(buffer)
 
-                        output.write(buffer, 0, bytesRead)
-                    }
-                } ?: throw RuntimeException("Не удалось открыть выбранный файл")
+                if (bytesRead == -1) {
+                    break
+                }
 
-                output.writeBytes("\r\n")
-                output.writeBytes("--$boundary--\r\n")
-                output.flush()
+                sink.write(buffer, 0, bytesRead)
             }
-
-            val responseCode = connection.responseCode
-            val responseText = readResponseText(connection)
-
-            if (responseCode !in 200..299) {
-                throw RuntimeException("Backend вернул код $responseCode: $responseText")
-            }
-
-            val item = JSONObject(responseText)
-
-            Track(
-                id = item.getInt("id"),
-                title = item.getString("title"),
-                author = item.getString("author"),
-                streamUrl = item.getString("stream_url"),
-                likesCount = item.optInt("likes_count", 0),
-                commentsCount = item.optInt("comments_count", 0),
-                createdAt = item.optString("created_at", ""),
-                fileSizeBytes = item.optLong("file_size_bytes", 0L),
-                durationSeconds = item.optInt("duration_seconds", 0),
-                playCount = item.optInt("play_count", 0)
-            )
-        } finally {
-            connection.disconnect()
-        }
+        } ?: throw RuntimeException("Не удалось открыть выбранный файл")
     }
 }
 
-fun writeFormField(
-    output: DataOutputStream,
-    boundary: String,
-    name: String,
-    value: String
-) {
-    output.writeBytes("--$boundary\r\n")
-    output.writeBytes("Content-Disposition: form-data; name=\"$name\"\r\n")
-    output.writeBytes("\r\n")
-    output.write(value.toByteArray(Charsets.UTF_8))
-    output.writeBytes("\r\n")
+private fun getContentLength(
+    context: Context,
+    uri: Uri
+): Long {
+    context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+        if (descriptor.length >= 0L) {
+            return descriptor.length
+        }
+    }
+
+    return -1L
 }
 
 fun getFileName(
@@ -8822,14 +8237,4 @@ fun formatTrackTime(milliseconds: Long): String {
     val seconds = totalSeconds % 60L
 
     return "%d:%02d".format(minutes, seconds)
-}
-
-fun readResponseText(connection: HttpURLConnection): String {
-    val stream = if (connection.responseCode in 200..299) {
-        connection.inputStream
-    } else {
-        connection.errorStream
-    }
-
-    return stream?.bufferedReader()?.use { it.readText() } ?: ""
 }
