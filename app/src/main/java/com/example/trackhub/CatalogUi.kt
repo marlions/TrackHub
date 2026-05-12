@@ -122,6 +122,9 @@ fun CatalogScreen(
     accessToken: String,
     tracksViewModel: TracksViewModel,
     playerViewModel: PlayerViewModel,
+    commentsViewModel: CommentsViewModel,
+    playlistsViewModel: PlaylistsViewModel,
+    usersViewModel: UsersViewModel,
     onLogout: () -> Unit
 ) {
     val tracks = tracksViewModel.tracks
@@ -236,6 +239,7 @@ fun CatalogScreen(
         CommentsScreen(
             track = selectedCommentsTrack,
             accessToken = accessToken,
+            commentsViewModel = commentsViewModel,
             onBack = closeComments
         )
         return
@@ -254,6 +258,7 @@ fun CatalogScreen(
         AddToPlaylistScreen(
             track = selectedPlaylistTrack,
             accessToken = accessToken,
+            playlistsViewModel = playlistsViewModel,
             onBack = closePlaylistAdd
         )
         return
@@ -266,6 +271,7 @@ fun CatalogScreen(
 
         UserSearchScreen(
             accessToken = accessToken,
+            usersViewModel = usersViewModel,
             onBack = {
                 showUserSearchScreen = false
             }
@@ -280,6 +286,7 @@ fun CatalogScreen(
 
         FollowingScreen(
             accessToken = accessToken,
+            usersViewModel = usersViewModel,
             onBack = {
                 showFollowingScreen = false
             }
@@ -471,6 +478,7 @@ fun CatalogScreen(
                             LibraryInnerScreen.PLAYLISTS -> {
                                 PlaylistsScreen(
                                     accessToken = accessToken,
+                                    playlistsViewModel = playlistsViewModel,
                                     onBack = {
                                         libraryInnerScreen = LibraryInnerScreen.MAIN
                                     }

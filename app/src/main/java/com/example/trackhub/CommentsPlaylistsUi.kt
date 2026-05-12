@@ -120,33 +120,18 @@ import androidx.compose.ui.text.TextStyle
 fun CommentsScreen(
     track: Track,
     accessToken: String,
+    commentsViewModel: CommentsViewModel,
     onBack: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-
-    var comments by remember { mutableStateOf<List<TrackComment>>(emptyList()) }
-    var commentText by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var isSending by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
-
-    fun loadComments() {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                comments = fetchComments(track.id)
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка загрузки комментариев"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
+    val comments = commentsViewModel.comments
+    val commentText = commentsViewModel.commentText
+    val isLoading = commentsViewModel.isLoading
+    val isSending = commentsViewModel.isSending
+    val errorText = commentsViewModel.errorText
 
     LaunchedEffect(track.id) {
-        loadComments()
+        commentsViewModel.clearForTrack()
+        commentsViewModel.loadComments(track.id)
     }
 
     Box(
@@ -202,10 +187,7 @@ fun CommentsScreen(
 
                     CommentInputField(
                         value = commentText,
-                        onValueChange = {
-                            commentText = it
-                            errorText = null
-                        }
+                        onValueChange = commentsViewModel::updateCommentText
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -213,33 +195,11 @@ fun CommentsScreen(
                     GoldPrimaryButton(
                         text = "Отправить",
                         enabled = !isSending && !isLoading,
-                        onClick = sendComment@{
-                            val trimmedText = commentText.trim()
-
-                            if (trimmedText.isBlank()) {
-                                errorText = "Комментарий не должен быть пустым"
-                                return@sendComment
-                            }
-
-                            if (trimmedText.length > 500) {
-                                errorText = "Комментарий должен быть не длиннее 500 символов"
-                                return@sendComment
-                            }
-
-                            scope.launch {
-                                isSending = true
-                                errorText = null
-
-                                try {
-                                    addComment(track.id, trimmedText, accessToken)
-                                    commentText = ""
-                                    comments = fetchComments(track.id)
-                                } catch (e: Exception) {
-                                    errorText = e.message ?: "Ошибка отправки комментария"
-                                } finally {
-                                    isSending = false
-                                }
-                            }
+                        onClick = {
+                            commentsViewModel.sendComment(
+                                trackId = track.id,
+                                accessToken = accessToken
+                            )
                         }
                     )
 
@@ -310,6 +270,7 @@ fun CommentsScreen(
         }
     }
 }
+
 
 @Composable
 fun CommentsTrackHeader(
@@ -565,33 +526,18 @@ fun EmptyCommentsCard() {
 fun AddToPlaylistScreen(
     track: Track,
     accessToken: String,
+    playlistsViewModel: PlaylistsViewModel,
     onBack: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
+    val playlists = playlistsViewModel.playlists
+    val playlistName = playlistsViewModel.playlistName
+    val isLoading = playlistsViewModel.isLoading
+    val errorText = playlistsViewModel.errorText
+    val successText = playlistsViewModel.successText
 
-    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
-    var playlistName by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
-    var successText by remember { mutableStateOf<String?>(null) }
-
-    fun loadPlaylists() {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                playlists = fetchPlaylists(accessToken)
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка загрузки плейлистов"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        loadPlaylists()
+    LaunchedEffect(track.id) {
+        playlistsViewModel.clearStatus()
+        playlistsViewModel.loadPlaylists(accessToken)
     }
 
     Box(
@@ -647,11 +593,7 @@ fun AddToPlaylistScreen(
 
                     PlaylistNameField(
                         value = playlistName,
-                        onValueChange = {
-                            playlistName = it
-                            errorText = null
-                            successText = null
-                        }
+                        onValueChange = playlistsViewModel::updatePlaylistName
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -659,30 +601,7 @@ fun AddToPlaylistScreen(
                     GoldSmallButton(
                         text = "Создать плейлист",
                         onClick = {
-                            val trimmedName = playlistName.trim()
-
-                            if (trimmedName.isBlank()) {
-                                errorText = "Название плейлиста не должно быть пустым"
-                            } else if (trimmedName.length > 100) {
-                                errorText = "Название плейлиста должно быть не длиннее 100 символов"
-                            } else {
-                                scope.launch {
-                                    isLoading = true
-                                    errorText = null
-                                    successText = null
-
-                                    try {
-                                        val createdPlaylist = createPlaylist(trimmedName, accessToken)
-                                        playlistName = ""
-                                        playlists = listOf(createdPlaylist) + playlists
-                                        successText = "Плейлист создан"
-                                    } catch (e: Exception) {
-                                        errorText = e.message ?: "Ошибка создания плейлиста"
-                                    } finally {
-                                        isLoading = false
-                                    }
-                                }
-                            }
+                            playlistsViewModel.createPlaylist(accessToken)
                         }
                     )
                 }
@@ -741,32 +660,11 @@ fun AddToPlaylistScreen(
                     playlist = playlist,
                     enabled = !isLoading,
                     onAddClick = {
-                        scope.launch {
-                            isLoading = true
-                            errorText = null
-                            successText = null
-
-                            try {
-                                addTrackToPlaylist(
-                                    playlistId = playlist.id,
-                                    trackId = track.id,
-                                    accessToken = accessToken
-                                )
-
-                                playlists = playlists.map { item ->
-                                    if (item.id == playlist.id) {
-                                        item.copy(tracksCount = item.tracksCount + 1)
-                                    } else {
-                                        item
-                                    }
-                                }
-                                successText = "Трек добавлен в плейлист «${playlist.name}»"
-                            } catch (e: Exception) {
-                                errorText = e.message ?: "Ошибка добавления в плейлист"
-                            } finally {
-                                isLoading = false
-                            }
-                        }
+                        playlistsViewModel.addTrackToPlaylist(
+                            playlist = playlist,
+                            track = track,
+                            accessToken = accessToken
+                        )
                     }
                 )
             }
@@ -777,6 +675,7 @@ fun AddToPlaylistScreen(
         }
     }
 }
+
 
 @Composable
 fun AddToPlaylistTrackHeader(
@@ -989,107 +888,21 @@ fun EmptyAddToPlaylistCard() {
 @Composable
 fun PlaylistsScreen(
     accessToken: String,
+    playlistsViewModel: PlaylistsViewModel,
     onBack: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-
-    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
-    var selectedPlaylist by remember { mutableStateOf<Playlist?>(null) }
-    var playlistTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var playlistName by remember { mutableStateOf("") }
-    var selectedPlaylistTrackMenu by remember { mutableStateOf<Track?>(null) }
-    var selectedPlaylistForDelete by remember { mutableStateOf<Playlist?>(null) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
-
-    fun loadPlaylists() {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                playlists = fetchPlaylists(accessToken)
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка загрузки плейлистов"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    fun openPlaylist(playlist: Playlist) {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                selectedPlaylist = playlist
-                playlistTracks = fetchPlaylistTracks(playlist.id, accessToken)
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка загрузки треков плейлиста"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    fun removeTrackFromCurrentPlaylist(track: Track) {
-        val playlist = selectedPlaylist ?: return
-
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                removeTrackFromPlaylist(
-                    playlistId = playlist.id,
-                    trackId = track.id,
-                    accessToken = accessToken
-                )
-
-                playlistTracks = playlistTracks.filterNot { it.id == track.id }
-                playlists = playlists.map { item ->
-                    if (item.id == playlist.id) {
-                        item.copy(tracksCount = (item.tracksCount - 1).coerceAtLeast(0))
-                    } else {
-                        item
-                    }
-                }
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка удаления трека из плейлиста"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    fun deletePlaylistAndReload(playlist: Playlist) {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                deletePlaylist(playlist.id, accessToken)
-
-                if (selectedPlaylist?.id == playlist.id) {
-                    selectedPlaylist = null
-                    playlistTracks = emptyList()
-                }
-
-                playlists = playlists.filterNot { it.id == playlist.id }
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка удаления плейлиста"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
+    val playlists = playlistsViewModel.playlists
+    val currentPlaylist = playlistsViewModel.selectedPlaylist
+    val playlistTracks = playlistsViewModel.playlistTracks
+    val playlistName = playlistsViewModel.playlistName
+    val selectedPlaylistTrackMenu = playlistsViewModel.selectedPlaylistTrackMenu
+    val selectedPlaylistForDelete = playlistsViewModel.selectedPlaylistForDelete
+    val isLoading = playlistsViewModel.isLoading
+    val errorText = playlistsViewModel.errorText
 
     LaunchedEffect(Unit) {
-        loadPlaylists()
+        playlistsViewModel.loadPlaylists(accessToken)
     }
-
-    val currentPlaylist = selectedPlaylist
 
     Box(
         modifier = Modifier
@@ -1099,8 +912,7 @@ fun PlaylistsScreen(
 
         if (currentPlaylist != null) {
             BackHandler {
-                selectedPlaylist = null
-                playlistTracks = emptyList()
+                playlistsViewModel.closeCurrentPlaylist()
             }
 
             LazyColumn(
@@ -1114,8 +926,7 @@ fun PlaylistsScreen(
                     TrackHubBackTextButton(
                         text = "← Назад к плейлистам",
                         onClick = {
-                            selectedPlaylist = null
-                            playlistTracks = emptyList()
+                            playlistsViewModel.closeCurrentPlaylist()
                         }
                     )
                 }
@@ -1170,7 +981,7 @@ fun PlaylistsScreen(
                     PlaylistTrackCard(
                         track = track,
                         onMoreClick = {
-                            selectedPlaylistTrackMenu = track
+                            playlistsViewModel.selectPlaylistTrackMenu(track)
                         }
                     )
                 }
@@ -1223,7 +1034,7 @@ fun PlaylistsScreen(
 
                         PlaylistNameField(
                             value = playlistName,
-                            onValueChange = { playlistName = it }
+                            onValueChange = playlistsViewModel::updatePlaylistName
                         )
 
                         Spacer(modifier = Modifier.height(12.dp))
@@ -1231,32 +1042,7 @@ fun PlaylistsScreen(
                         GoldSmallButton(
                             text = "Создать",
                             onClick = {
-                                val trimmedName = playlistName.trim()
-
-                                if (trimmedName.isBlank()) {
-                                    errorText = "Название плейлиста не должно быть пустым"
-                                    return@GoldSmallButton
-                                }
-
-                                if (trimmedName.length > 100) {
-                                    errorText = "Название плейлиста должно быть не длиннее 100 символов"
-                                    return@GoldSmallButton
-                                }
-
-                                scope.launch {
-                                    isLoading = true
-                                    errorText = null
-
-                                    try {
-                                        val createdPlaylist = createPlaylist(trimmedName, accessToken)
-                                        playlistName = ""
-                                        playlists = listOf(createdPlaylist) + playlists
-                                    } catch (e: Exception) {
-                                        errorText = e.message ?: "Ошибка создания плейлиста"
-                                    } finally {
-                                        isLoading = false
-                                    }
-                                }
+                                playlistsViewModel.createPlaylist(accessToken)
                             }
                         )
                     }
@@ -1305,10 +1091,13 @@ fun PlaylistsScreen(
                     PlaylistCard(
                         playlist = playlist,
                         onClick = {
-                            openPlaylist(playlist)
+                            playlistsViewModel.openPlaylist(
+                                playlist = playlist,
+                                accessToken = accessToken
+                            )
                         },
                         onDeleteClick = {
-                            selectedPlaylistForDelete = playlist
+                            playlistsViewModel.requestDeletePlaylist(playlist)
                         }
                     )
                 }
@@ -1323,11 +1112,14 @@ fun PlaylistsScreen(
             RemoveFromPlaylistDialog(
                 track = track,
                 onDismiss = {
-                    selectedPlaylistTrackMenu = null
+                    playlistsViewModel.dismissPlaylistTrackMenu()
                 },
                 onRemoveClick = {
-                    selectedPlaylistTrackMenu = null
-                    removeTrackFromCurrentPlaylist(track)
+                    playlistsViewModel.dismissPlaylistTrackMenu()
+                    playlistsViewModel.removeTrackFromCurrentPlaylist(
+                        track = track,
+                        accessToken = accessToken
+                    )
                 }
             )
         }
@@ -1336,16 +1128,16 @@ fun PlaylistsScreen(
             DeletePlaylistConfirmDialog(
                 playlist = playlist,
                 onDismiss = {
-                    selectedPlaylistForDelete = null
+                    playlistsViewModel.dismissDeletePlaylist()
                 },
                 onConfirm = {
-                    selectedPlaylistForDelete = null
-                    deletePlaylistAndReload(playlist)
+                    playlistsViewModel.deleteSelectedPlaylist(accessToken)
                 }
             )
         }
     }
 }
+
 
 @Composable
 fun TrackHubBackTextButton(

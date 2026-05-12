@@ -12,6 +12,9 @@ class MainActivity : ComponentActivity() {
     private val sessionViewModel: SessionViewModel by viewModels()
     private val tracksViewModel: TracksViewModel by viewModels()
     private val playerViewModel: PlayerViewModel by viewModels()
+    private val commentsViewModel: CommentsViewModel by viewModels()
+    private val playlistsViewModel: PlaylistsViewModel by viewModels()
+    private val usersViewModel: UsersViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -22,7 +25,10 @@ class MainActivity : ComponentActivity() {
                 TrackHubApp(
                     sessionViewModel = sessionViewModel,
                     tracksViewModel = tracksViewModel,
-                    playerViewModel = playerViewModel
+                    playerViewModel = playerViewModel,
+                    commentsViewModel = commentsViewModel,
+                    playlistsViewModel = playlistsViewModel,
+                    usersViewModel = usersViewModel
                 )
             }
         }
@@ -33,7 +39,10 @@ class MainActivity : ComponentActivity() {
 fun TrackHubApp(
     sessionViewModel: SessionViewModel,
     tracksViewModel: TracksViewModel,
-    playerViewModel: PlayerViewModel
+    playerViewModel: PlayerViewModel,
+    commentsViewModel: CommentsViewModel,
+    playlistsViewModel: PlaylistsViewModel,
+    usersViewModel: UsersViewModel
 ) {
     val accessToken = sessionViewModel.accessToken
 
@@ -48,6 +57,9 @@ fun TrackHubApp(
             accessToken = accessToken,
             tracksViewModel = tracksViewModel,
             playerViewModel = playerViewModel,
+            commentsViewModel = commentsViewModel,
+            playlistsViewModel = playlistsViewModel,
+            usersViewModel = usersViewModel,
             onLogout = {
                 playerViewModel.pause()
                 sessionViewModel.clearAccessToken()

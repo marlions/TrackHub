@@ -16,6 +16,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class TracksViewModel : ViewModel() {
+    private val repository = TrackHubRepository
+
     var tracks by mutableStateOf<List<Track>>(emptyList())
         private set
 
@@ -51,7 +53,7 @@ class TracksViewModel : ViewModel() {
             errorText = null
 
             try {
-                tracks = fetchTracks(query, accessToken)
+                tracks = repository.fetchTracks(query, accessToken)
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки треков"
             } finally {
@@ -66,7 +68,7 @@ class TracksViewModel : ViewModel() {
             errorText = null
 
             try {
-                myTracks = fetchMyTracks(accessToken)
+                myTracks = repository.fetchMyTracks(accessToken)
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки моих треков"
             } finally {
@@ -86,7 +88,7 @@ class TracksViewModel : ViewModel() {
             }
 
             try {
-                likedTracks = fetchLikedTracks(accessToken)
+                likedTracks = repository.fetchLikedTracks(accessToken)
             } catch (e: Exception) {
                 if (!silent) {
                     errorText = e.message ?: "Ошибка загрузки любимых треков"
@@ -107,7 +109,7 @@ class TracksViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 delay(900)
-                val freshTracks = fetchTracks(query, accessToken)
+                val freshTracks = repository.fetchTracks(query, accessToken)
                 tracks = freshTracks
                 freshTracks.forEach(onTrackUpdated)
             } catch (_: Exception) {
@@ -125,7 +127,7 @@ class TracksViewModel : ViewModel() {
             errorText = null
 
             try {
-                val likeResult = likeTrack(track.id, accessToken)
+                val likeResult = repository.likeTrack(track.id, accessToken)
                 val updatedTrack = track.copy(
                     likesCount = likeResult.likesCount,
                     isLiked = likeResult.liked
@@ -165,7 +167,7 @@ class TracksViewModel : ViewModel() {
             errorText = null
 
             try {
-                deleteTrack(track.id, accessToken)
+                repository.deleteTrack(track.id, accessToken)
 
                 tracks = tracks.filterNot { it.id == track.id }
                 myTracks = myTracks.filterNot { it.id == track.id }
@@ -221,6 +223,8 @@ class TracksViewModel : ViewModel() {
 }
 
 class PlayerViewModel(application: Application) : AndroidViewModel(application) {
+    private val repository = TrackHubRepository
+
     private val player = ExoPlayer.Builder(application).build()
     private var positionTickerJob: Job? = null
 
@@ -280,7 +284,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             try {
-                val newPlayCount = registerTrackPlay(track.id, accessToken)
+                val newPlayCount = repository.registerTrackPlay(track.id, accessToken)
                 updateCurrentTrack(track.id) { item ->
                     item.copy(playCount = newPlayCount)
                 }

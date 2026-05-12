@@ -506,75 +506,19 @@ fun ProfileActionRow(
 @Composable
 fun UserSearchScreen(
     accessToken: String,
+    usersViewModel: UsersViewModel,
     onBack: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
+    val query = usersViewModel.query
+    val users = usersViewModel.users
+    val isLoading = usersViewModel.isLoading
+    val errorText = usersViewModel.errorText
 
-    var query by remember { mutableStateOf("") }
-    var users by remember { mutableStateOf<List<UserPublic>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
-
-    fun loadUsers(searchText: String = query) {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                users = searchUsers(
-                    accessToken = accessToken,
-                    query = searchText
-                )
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка поиска пользователей"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    fun toggleFollow(user: UserPublic) {
-        scope.launch {
-            errorText = null
-
-            try {
-                val status = if (user.isFollowing) {
-                    unfollowUser(user.id, accessToken)
-                } else {
-                    followUser(user.id, accessToken)
-                }
-
-                users = users.map { item ->
-                    if (item.id == user.id) {
-                        item.copy(
-                            isFollowing = status.isFollowing,
-                            followersCount = status.followersCount
-                        )
-                    } else {
-                        item
-                    }
-                }
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка изменения подписки"
-            }
-        }
-    }
-
-    LaunchedEffect(query) {
-        delay(350)
-        isLoading = true
-        errorText = null
-
-        try {
-            users = searchUsers(
-                accessToken = accessToken,
-                query = query
-            )
-        } catch (e: Exception) {
-            errorText = e.message ?: "Ошибка поиска пользователей"
-        } finally {
-            isLoading = false
-        }
+    LaunchedEffect(Unit) {
+        usersViewModel.loadUsers(
+            accessToken = accessToken,
+            searchText = ""
+        )
     }
 
     Box(
@@ -610,7 +554,10 @@ fun UserSearchScreen(
                 UserSearchField(
                     value = query,
                     onValueChange = {
-                        query = it
+                        usersViewModel.updateQuery(
+                            value = it,
+                            accessToken = accessToken
+                        )
                     }
                 )
             }
@@ -620,7 +567,7 @@ fun UserSearchScreen(
                     BackendErrorCard(
                         text = it,
                         onRetry = {
-                            loadUsers(query)
+                            usersViewModel.loadUsers(accessToken)
                         }
                     )
                 }
@@ -658,7 +605,10 @@ fun UserSearchScreen(
                 UserPublicCard(
                     user = user,
                     onFollowClick = {
-                        toggleFollow(user)
+                        usersViewModel.toggleFollow(
+                            user = user,
+                            accessToken = accessToken
+                        )
                     }
                 )
             }
@@ -670,47 +620,19 @@ fun UserSearchScreen(
     }
 }
 
+
 @Composable
 fun FollowingScreen(
     accessToken: String,
+    usersViewModel: UsersViewModel,
     onBack: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-
-    var following by remember { mutableStateOf<List<FollowUser>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
-
-    fun loadFollowing() {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                following = fetchMyFollowing(accessToken)
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка загрузки подписок"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    fun unfollowAndReload(user: FollowUser) {
-        scope.launch {
-            errorText = null
-
-            try {
-                unfollowUser(user.id, accessToken)
-                following = following.filterNot { it.id == user.id }
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка отписки"
-            }
-        }
-    }
+    val following = usersViewModel.following
+    val isLoading = usersViewModel.isLoading
+    val errorText = usersViewModel.errorText
 
     LaunchedEffect(Unit) {
-        loadFollowing()
+        usersViewModel.loadFollowing(accessToken)
     }
 
     Box(
@@ -756,7 +678,7 @@ fun FollowingScreen(
                     BackendErrorCard(
                         text = it,
                         onRetry = {
-                            loadFollowing()
+                            usersViewModel.loadFollowing(accessToken)
                         }
                     )
                 }
@@ -790,7 +712,10 @@ fun FollowingScreen(
                 FollowingUserCard(
                     user = user,
                     onUnfollowClick = {
-                        unfollowAndReload(user)
+                        usersViewModel.unfollowAndRemove(
+                            user = user,
+                            accessToken = accessToken
+                        )
                     }
                 )
             }
@@ -801,6 +726,7 @@ fun FollowingScreen(
         }
     }
 }
+
 
 @Composable
 fun UserSearchField(
