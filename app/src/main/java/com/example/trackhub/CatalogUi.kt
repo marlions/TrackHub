@@ -120,25 +120,25 @@ import androidx.compose.ui.text.TextStyle
 @Composable
 fun CatalogScreen(
     accessToken: String,
+    tracksViewModel: TracksViewModel,
+    playerViewModel: PlayerViewModel,
     onLogout: () -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val tracks = tracksViewModel.tracks
+    val myTracks = tracksViewModel.myTracks
+    val likedTracks = tracksViewModel.likedTracks
+    val searchQuery = tracksViewModel.searchQuery
+    val isLoading = tracksViewModel.isLoading
+    val errorText = tracksViewModel.errorText
 
-    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var myTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var likedTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var searchQuery by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
+    val currentTrack = playerViewModel.currentTrack
+    val isPlaying = playerViewModel.isPlaying
+    val currentPositionMs = playerViewModel.currentPositionMs
+    val durationMs = playerViewModel.durationMs
+    val playerVolume = playerViewModel.playerVolume
 
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var libraryInnerScreen by remember { mutableStateOf(LibraryInnerScreen.MAIN) }
-    var currentTrack by remember { mutableStateOf<Track?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPositionMs by remember { mutableStateOf(0L) }
-    var durationMs by remember { mutableStateOf(0L) }
-    var playerVolume by remember { mutableStateOf(1f) }
     var showFullPlayerScreen by remember { mutableStateOf(false) }
 
     var selectedTrackForComments by remember { mutableStateOf<Track?>(null) }
@@ -146,236 +146,78 @@ fun CatalogScreen(
     var selectedTrackMenu by remember { mutableStateOf<Track?>(null) }
     var selectedTrackInfo by remember { mutableStateOf<Track?>(null) }
     var trackPendingDelete by remember { mutableStateOf<Track?>(null) }
-    var showPlaylistsScreen by remember { mutableStateOf(false) }
-    var showProfileScreen by remember { mutableStateOf(false) }
     var showUserSearchScreen by remember { mutableStateOf(false) }
     var showFollowingScreen by remember { mutableStateOf(false) }
+    var showProfileScreen by remember { mutableStateOf(false) }
 
-    val player = remember {
-        ExoPlayer.Builder(context).build()
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            player.release()
+    fun onPlayCountChanged(trackId: Int, playCount: Int) {
+        tracksViewModel.updatePlayCount(trackId, playCount) { updatedTrack ->
+            playerViewModel.updateCurrentTrack(trackId) { updatedTrack }
         }
     }
 
-    fun loadTracks(query: String = "") {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                tracks = fetchTracks(query, accessToken)
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка загрузки треков"
-            } finally {
-                isLoading = false
-            }
-        }
+    fun loadTracks(query: String = searchQuery) {
+        tracksViewModel.loadTracks(accessToken, query)
     }
 
     fun loadMyTracks() {
-        scope.launch {
-            isLoading = true
-            errorText = null
-
-            try {
-                myTracks = fetchMyTracks(accessToken)
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка загрузки моих треков"
-            } finally {
-                isLoading = false
-            }
-        }
+        tracksViewModel.loadMyTracks(accessToken)
     }
 
-    fun loadLikedTracks() {
-        scope.launch {
-            try {
-                likedTracks = fetchLikedTracks(accessToken)
-            } catch (_: Exception) {
-                // Если список лайков временно не загрузился, основной интерфейс продолжает работать.
-            }
-        }
+    fun loadLikedTracks(silent: Boolean = true) {
+        tracksViewModel.loadLikedTracks(
+            accessToken = accessToken,
+            silent = silent
+        )
     }
 
-    fun refreshTracksSilently(query: String = searchQuery) {
-        scope.launch {
-            try {
-                delay(900)
-                val freshTracks = fetchTracks(query, accessToken)
-                tracks = freshTracks
-
-                currentTrack?.let { playingTrack ->
-                    freshTracks.firstOrNull { it.id == playingTrack.id }?.let { updatedTrack ->
-                        currentTrack = updatedTrack
-                    }
-                }
-            } catch (_: Exception) {
-                // Тихое обновление не должно ломать интерфейс, если сервер временно недоступен.
-            }
-        }
-    }
-
-    fun playTrack(track: Track) {
-        val fullStreamUrl = if (track.streamUrl.startsWith("http")) {
-            track.streamUrl
-        } else {
-            BASE_URL + track.streamUrl
-        }
-
-        val mediaItem = MediaItem.fromUri(Uri.parse(fullStreamUrl))
-
-        player.setMediaItem(mediaItem)
-        player.prepare()
-        player.play()
-
-        currentTrack = track
-        currentPositionMs = 0L
-        durationMs = 0L
-        isPlaying = true
-
-        scope.launch {
-            try {
-                val newPlayCount = registerTrackPlay(track.id, accessToken)
-
-                tracks = tracks.map { item ->
-                    if (item.id == track.id) item.copy(playCount = newPlayCount) else item
-                }
-
-                myTracks = myTracks.map { item ->
-                    if (item.id == track.id) item.copy(playCount = newPlayCount) else item
-                }
-
-                currentTrack = currentTrack?.let { item ->
-                    if (item.id == track.id) item.copy(playCount = newPlayCount) else item
-                }
-            } catch (_: Exception) {
-                // Воспроизведение не должно останавливаться, если счётчик прослушиваний временно не обновился.
-            }
-        }
+    fun playTrack(
+        track: Track,
+        queue: List<Track> = tracks
+    ) {
+        playerViewModel.playTrack(
+            track = track,
+            accessToken = accessToken,
+            queue = queue,
+            onPlayCountChanged = ::onPlayCountChanged
+        )
     }
 
     fun togglePlayPause() {
-        if (currentTrack == null) return
-
-        if (player.isPlaying) {
-            player.pause()
-            isPlaying = false
-        } else {
-            player.play()
-            isPlaying = true
-        }
+        playerViewModel.togglePlayPause()
     }
 
     fun playAdjacentTrack(direction: Int) {
-        if (tracks.isEmpty()) return
-
-        val currentId = currentTrack?.id
-        val currentIndex = tracks.indexOfFirst { it.id == currentId }
-        val safeIndex = if (currentIndex >= 0) currentIndex else 0
-        val nextIndex = (safeIndex + direction + tracks.size) % tracks.size
-
-        playTrack(tracks[nextIndex])
-    }
-
-    fun updateTrackLocally(trackId: Int, transform: (Track) -> Track) {
-        tracks = tracks.map { track ->
-            if (track.id == trackId) transform(track) else track
-        }
-
-        myTracks = myTracks.map { track ->
-            if (track.id == trackId) transform(track) else track
-        }
-
-        currentTrack = currentTrack?.let { track ->
-            if (track.id == trackId) transform(track) else track
-        }
+        playerViewModel.playAdjacentTrack(
+            direction = direction,
+            accessToken = accessToken,
+            onPlayCountChanged = ::onPlayCountChanged
+        )
     }
 
     fun likeAndReload(track: Track) {
-        scope.launch {
-            errorText = null
-
-            try {
-                val likeResult = likeTrack(track.id, accessToken)
-
-                updateTrackLocally(track.id) { current ->
-                    current.copy(
-                        likesCount = likeResult.likesCount,
-                        isLiked = likeResult.liked
-                    )
-                }
-
-                if (likeResult.liked) {
-                    val updatedTrack = (tracks + myTracks + listOf(track))
-                        .firstOrNull { it.id == track.id }
-                        ?.copy(likesCount = likeResult.likesCount, isLiked = true)
-                        ?: track.copy(likesCount = likeResult.likesCount, isLiked = true)
-
-                    likedTracks = listOf(updatedTrack) + likedTracks.filterNot { it.id == track.id }
-                } else {
-                    likedTracks = likedTracks.filterNot { it.id == track.id }
-                }
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка лайка"
+        tracksViewModel.toggleLike(
+            track = track,
+            accessToken = accessToken,
+            onTrackUpdated = { updatedTrack ->
+                playerViewModel.updateCurrentTrack(updatedTrack.id) { updatedTrack }
             }
-        }
+        )
     }
 
     fun deleteTrackAndReload(track: Track) {
-        scope.launch {
-            errorText = null
-
-            try {
-                deleteTrack(track.id, accessToken)
-
-                tracks = tracks.filterNot { it.id == track.id }
-                myTracks = myTracks.filterNot { it.id == track.id }
-                likedTracks = likedTracks.filterNot { it.id == track.id }
-
-                if (currentTrack?.id == track.id) {
-                    player.stop()
-                    currentTrack = null
-                    isPlaying = false
-                    currentPositionMs = 0L
-                    durationMs = 0L
-                }
-            } catch (e: Exception) {
-                errorText = e.message ?: "Ошибка удаления трека"
+        tracksViewModel.deleteTrackAndUpdate(
+            track = track,
+            accessToken = accessToken,
+            onDeleted = {
+                playerViewModel.stopIfTrackDeleted(track.id)
             }
-        }
+        )
     }
 
     LaunchedEffect(Unit) {
         loadTracks()
         loadLikedTracks()
-    }
-
-    LaunchedEffect(currentTrack?.id) {
-        if (currentTrack == null) return@LaunchedEffect
-
-        while (true) {
-            currentPositionMs = player.currentPosition.coerceAtLeast(0L)
-
-            val playerDuration = player.duration
-            durationMs = if (playerDuration > 0L) {
-                playerDuration
-            } else {
-                0L
-            }
-
-            isPlaying = player.isPlaying
-
-            if (player.playbackState == Player.STATE_ENDED && tracks.size > 1) {
-                playAdjacentTrack(1)
-                break
-            }
-
-            delay(300)
-        }
     }
 
     val selectedCommentsTrack = selectedTrackForComments
@@ -416,24 +258,6 @@ fun CatalogScreen(
         )
         return
     }
-
-    if (showPlaylistsScreen) {
-        val closePlaylists = {
-            showPlaylistsScreen = false
-            loadTracks(searchQuery)
-        }
-
-        BackHandler {
-            closePlaylists()
-        }
-
-        PlaylistsScreen(
-            accessToken = accessToken,
-            onBack = closePlaylists
-        )
-        return
-    }
-
 
     if (showUserSearchScreen) {
         BackHandler {
@@ -482,7 +306,7 @@ fun CatalogScreen(
                 showProfileScreen = false
             },
             onLogout = {
-                player.pause()
+                playerViewModel.pause()
                 showProfileScreen = false
                 onLogout()
             }
@@ -491,7 +315,7 @@ fun CatalogScreen(
     }
 
     if (showFullPlayerScreen && currentTrack != null) {
-        val track = currentTrack!!
+        val track = currentTrack
 
         TrackHubFullPlayerScreen(
             track = track,
@@ -507,20 +331,10 @@ fun CatalogScreen(
                 likeAndReload(track)
             },
             onSeekTo = { positionMs ->
-                val targetPosition = if (durationMs > 0L) {
-                    positionMs.coerceIn(0L, durationMs)
-                } else {
-                    positionMs.coerceAtLeast(0L)
-                }
-
-                player.seekTo(targetPosition)
-                currentPositionMs = targetPosition
+                playerViewModel.seekTo(positionMs)
             },
             onVolumeChange = { newVolume ->
-                val safeVolume = newVolume.coerceIn(0f, 1f)
-
-                playerVolume = safeVolume
-                player.volume = safeVolume
+                playerViewModel.changeVolume(newVolume)
             },
             onPlayPauseClick = {
                 togglePlayPause()
@@ -550,6 +364,7 @@ fun CatalogScreen(
             ) {
                 libraryInnerScreen = LibraryInnerScreen.MAIN
             }
+
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -573,7 +388,7 @@ fun CatalogScreen(
                                 showProfileScreen = true
                             },
                             onPlayClick = { track ->
-                                playTrack(track)
+                                playTrack(track, tracks)
                             },
                             onLikeClick = { track ->
                                 likeAndReload(track)
@@ -593,7 +408,9 @@ fun CatalogScreen(
                     MainTab.SEARCH -> {
                         SearchTabScreen(
                             searchQuery = searchQuery,
-                            onSearchQueryChange = { searchQuery = it },
+                            onSearchQueryChange = { value ->
+                                tracksViewModel.updateSearchQuery(value)
+                            },
                             tracks = tracks,
                             isLoading = isLoading,
                             errorText = errorText,
@@ -603,14 +420,14 @@ fun CatalogScreen(
                                 loadTracks(searchQuery)
                             },
                             onAllTracksClick = {
-                                searchQuery = ""
-                                loadTracks()
+                                tracksViewModel.updateSearchQuery("")
+                                loadTracks("")
                             },
                             onPlayClick = { track ->
                                 if (currentTrack?.id == track.id) {
                                     togglePlayPause()
                                 } else {
-                                    playTrack(track)
+                                    playTrack(track, tracks)
                                 }
                             },
                             onLikeClick = { track ->
@@ -639,7 +456,7 @@ fun CatalogScreen(
                                     },
                                     onLikedTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.LIKED_TRACKS
-                                        loadLikedTracks()
+                                        loadLikedTracks(silent = false)
                                     },
                                     onMyTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.MY_TRACKS
@@ -663,7 +480,7 @@ fun CatalogScreen(
                             LibraryInnerScreen.LIKED_TRACKS -> {
                                 LibraryTracksListScreen(
                                     title = "Любимые треки",
-                                    subtitle = "Треки, которые получили лайки",
+                                    subtitle = "Треки, которые понравились именно вам",
                                     emptyText = "Пока нет любимых треков",
                                     tracks = likedTracks,
                                     currentTrack = currentTrack,
@@ -675,7 +492,7 @@ fun CatalogScreen(
                                         if (currentTrack?.id == track.id) {
                                             togglePlayPause()
                                         } else {
-                                            playTrack(track)
+                                            playTrack(track, likedTracks)
                                         }
                                     },
                                     onLikeClick = { track ->
@@ -708,7 +525,7 @@ fun CatalogScreen(
                                         if (currentTrack?.id == track.id) {
                                             togglePlayPause()
                                         } else {
-                                            playTrack(track)
+                                            playTrack(track, myTracks)
                                         }
                                     },
                                     onLikeClick = { track ->
@@ -741,7 +558,7 @@ fun CatalogScreen(
                                         if (currentTrack?.id == track.id) {
                                             togglePlayPause()
                                         } else {
-                                            playTrack(track)
+                                            playTrack(track, tracks)
                                         }
                                     },
                                     onLikeClick = { track ->
@@ -765,12 +582,10 @@ fun CatalogScreen(
                         CreateTabScreen(
                             accessToken = accessToken,
                             onUploadSuccess = { uploadedTrack ->
-                                tracks = listOf(uploadedTrack) + tracks
-                                myTracks = listOf(uploadedTrack) + myTracks.filterNot { it.id == uploadedTrack.id }
+                                tracksViewModel.addUploadedTrack(uploadedTrack)
                             }
                         )
                     }
-
                 }
             }
 
@@ -782,20 +597,10 @@ fun CatalogScreen(
                     durationMs = durationMs,
                     volume = playerVolume,
                     onSeekTo = { positionMs ->
-                        val targetPosition = if (durationMs > 0L) {
-                            positionMs.coerceIn(0L, durationMs)
-                        } else {
-                            positionMs.coerceAtLeast(0L)
-                        }
-
-                        player.seekTo(targetPosition)
-                        currentPositionMs = targetPosition
+                        playerViewModel.seekTo(positionMs)
                     },
                     onVolumeChange = { newVolume ->
-                        val safeVolume = newVolume.coerceIn(0f, 1f)
-
-                        playerVolume = safeVolume
-                        player.volume = safeVolume
+                        playerViewModel.changeVolume(newVolume)
                     },
                     onOpenPlayerClick = {
                         showFullPlayerScreen = true
@@ -817,6 +622,7 @@ fun CatalogScreen(
                 }
             )
         }
+
         selectedTrackMenu?.let { track ->
             TrackOptionsDialog(
                 track = track,
@@ -864,5 +670,4 @@ fun CatalogScreen(
             )
         }
     }
-
 }
