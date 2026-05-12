@@ -202,7 +202,7 @@ fun AuthScreen(
                         return@validateAndSubmit
                     }
 
-                    if (trimmedPassword.length < 8) {
+                    if (trimmedPassword.length < MIN_PASSWORD_LENGTH) {
                         errorText = "Пароль должен содержать минимум 8 символов"
                         return@validateAndSubmit
                     }

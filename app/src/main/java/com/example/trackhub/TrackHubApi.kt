@@ -174,14 +174,24 @@ suspend fun authRequest(
 
 suspend fun fetchTracks(
     query: String,
-    accessToken: String? = null
+    accessToken: String? = null,
+    limit: Int = TRACK_PAGE_SIZE,
+    offset: Int = 0
 ): List<Track> {
+    val baseParams = mapOf(
+        "limit" to limit.toString(),
+        "offset" to offset.toString()
+    )
+
     val url = if (query.isBlank()) {
-        buildUrl("/api/tracks")
+        buildUrl(
+            path = "/api/tracks",
+            queryParams = baseParams
+        )
     } else {
         buildUrl(
             path = "/api/tracks/search",
-            queryParams = mapOf("query" to query)
+            queryParams = baseParams + mapOf("query" to query)
         )
     }
 
@@ -198,10 +208,20 @@ suspend fun fetchTracks(
 }
 
 suspend fun fetchMyTracks(
-    accessToken: String
+    accessToken: String,
+    limit: Int = TRACK_PAGE_SIZE,
+    offset: Int = 0
 ): List<Track> {
     val request = Request.Builder()
-        .url(buildUrl("/api/tracks/my"))
+        .url(
+            buildUrl(
+                path = "/api/tracks/my",
+                queryParams = mapOf(
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString()
+                )
+            )
+        )
         .get()
         .acceptJson()
         .bearerToken(accessToken)
@@ -211,10 +231,20 @@ suspend fun fetchMyTracks(
 }
 
 suspend fun fetchLikedTracks(
-    accessToken: String
+    accessToken: String,
+    limit: Int = TRACK_PAGE_SIZE,
+    offset: Int = 0
 ): List<Track> {
     val request = Request.Builder()
-        .url(buildUrl("/api/tracks/liked"))
+        .url(
+            buildUrl(
+                path = "/api/tracks/liked",
+                queryParams = mapOf(
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString()
+                )
+            )
+        )
         .get()
         .acceptJson()
         .bearerToken(accessToken)
@@ -258,10 +288,20 @@ suspend fun registerTrackPlay(
 }
 
 suspend fun fetchComments(
-    trackId: Int
+    trackId: Int,
+    limit: Int = COMMENT_PAGE_SIZE,
+    offset: Int = 0
 ): List<TrackComment> {
     val request = Request.Builder()
-        .url(buildUrl("/api/tracks/$trackId/comments"))
+        .url(
+            buildUrl(
+                path = "/api/tracks/$trackId/comments",
+                queryParams = mapOf(
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString()
+                )
+            )
+        )
         .get()
         .acceptJson()
         .build()
@@ -304,10 +344,20 @@ suspend fun addComment(
 }
 
 suspend fun fetchPlaylists(
-    accessToken: String
+    accessToken: String,
+    limit: Int = PLAYLIST_PAGE_SIZE,
+    offset: Int = 0
 ): List<Playlist> {
     val request = Request.Builder()
-        .url(buildUrl("/api/playlists"))
+        .url(
+            buildUrl(
+                path = "/api/playlists",
+                queryParams = mapOf(
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString()
+                )
+            )
+        )
         .get()
         .acceptJson()
         .bearerToken(accessToken)
@@ -393,10 +443,20 @@ suspend fun removeTrackFromPlaylist(
 
 suspend fun fetchPlaylistTracks(
     playlistId: Int,
-    accessToken: String
+    accessToken: String,
+    limit: Int = TRACK_PAGE_SIZE,
+    offset: Int = 0
 ): List<Track> {
     val request = Request.Builder()
-        .url(buildUrl("/api/playlists/$playlistId/tracks"))
+        .url(
+            buildUrl(
+                path = "/api/playlists/$playlistId/tracks",
+                queryParams = mapOf(
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString()
+                )
+            )
+        )
         .get()
         .acceptJson()
         .bearerToken(accessToken)
@@ -407,13 +467,19 @@ suspend fun fetchPlaylistTracks(
 
 suspend fun searchUsers(
     accessToken: String,
-    query: String
+    query: String,
+    limit: Int = USER_PAGE_SIZE,
+    offset: Int = 0
 ): List<UserPublic> {
     val request = Request.Builder()
         .url(
             buildUrl(
                 path = "/api/users/search",
-                queryParams = mapOf("query" to query)
+                queryParams = mapOf(
+                    "query" to query,
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString()
+                )
             )
         )
         .get()
@@ -442,10 +508,20 @@ suspend fun searchUsers(
 }
 
 suspend fun fetchMyFollowing(
-    accessToken: String
+    accessToken: String,
+    limit: Int = USER_PAGE_SIZE,
+    offset: Int = 0
 ): List<FollowUser> {
     val request = Request.Builder()
-        .url(buildUrl("/api/users/me/following"))
+        .url(
+            buildUrl(
+                path = "/api/users/me/following",
+                queryParams = mapOf(
+                    "limit" to limit.toString(),
+                    "offset" to offset.toString()
+                )
+            )
+        )
         .get()
         .acceptJson()
         .bearerToken(accessToken)
@@ -559,7 +635,7 @@ private class UriRequestBody(
     }
 
     override fun contentLength(): Long {
-        return getContentLength(context, uri)
+        return getFileSizeBytes(context, uri)
     }
 
     override fun writeTo(sink: BufferedSink) {
@@ -579,7 +655,7 @@ private class UriRequestBody(
     }
 }
 
-private fun getContentLength(
+fun getFileSizeBytes(
     context: Context,
     uri: Uri
 ): Long {

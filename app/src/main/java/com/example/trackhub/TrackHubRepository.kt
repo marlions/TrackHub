@@ -27,14 +27,22 @@ object TrackHubRepository {
 
     suspend fun fetchTracks(
         query: String,
-        accessToken: String
-    ): List<Track> = com.example.trackhub.fetchTracks(query, accessToken)
+        accessToken: String,
+        limit: Int = TRACK_PAGE_SIZE,
+        offset: Int = 0
+    ): List<Track> = com.example.trackhub.fetchTracks(query, accessToken, limit, offset)
 
-    suspend fun fetchMyTracks(accessToken: String): List<Track> =
-        com.example.trackhub.fetchMyTracks(accessToken)
+    suspend fun fetchMyTracks(
+        accessToken: String,
+        limit: Int = TRACK_PAGE_SIZE,
+        offset: Int = 0
+    ): List<Track> = com.example.trackhub.fetchMyTracks(accessToken, limit, offset)
 
-    suspend fun fetchLikedTracks(accessToken: String): List<Track> =
-        com.example.trackhub.fetchLikedTracks(accessToken)
+    suspend fun fetchLikedTracks(
+        accessToken: String,
+        limit: Int = TRACK_PAGE_SIZE,
+        offset: Int = 0
+    ): List<Track> = com.example.trackhub.fetchLikedTracks(accessToken, limit, offset)
 
     suspend fun likeTrack(
         trackId: Int,
@@ -59,8 +67,11 @@ object TrackHubRepository {
         accessToken: String
     ): Track = com.example.trackhub.uploadTrack(context, title, author, fileUri, accessToken)
 
-    suspend fun fetchComments(trackId: Int): List<TrackComment> =
-        com.example.trackhub.fetchComments(trackId)
+    suspend fun fetchComments(
+        trackId: Int,
+        limit: Int = COMMENT_PAGE_SIZE,
+        offset: Int = 0
+    ): List<TrackComment> = com.example.trackhub.fetchComments(trackId, limit, offset)
 
     suspend fun addComment(
         trackId: Int,
@@ -68,8 +79,11 @@ object TrackHubRepository {
         accessToken: String
     ) = com.example.trackhub.addComment(trackId, text, accessToken)
 
-    suspend fun fetchPlaylists(accessToken: String): List<Playlist> =
-        com.example.trackhub.fetchPlaylists(accessToken)
+    suspend fun fetchPlaylists(
+        accessToken: String,
+        limit: Int = PLAYLIST_PAGE_SIZE,
+        offset: Int = 0
+    ): List<Playlist> = com.example.trackhub.fetchPlaylists(accessToken, limit, offset)
 
     suspend fun createPlaylist(
         name: String,
@@ -95,16 +109,23 @@ object TrackHubRepository {
 
     suspend fun fetchPlaylistTracks(
         playlistId: Int,
-        accessToken: String
-    ): List<Track> = com.example.trackhub.fetchPlaylistTracks(playlistId, accessToken)
+        accessToken: String,
+        limit: Int = TRACK_PAGE_SIZE,
+        offset: Int = 0
+    ): List<Track> = com.example.trackhub.fetchPlaylistTracks(playlistId, accessToken, limit, offset)
 
     suspend fun searchUsers(
         accessToken: String,
-        query: String
-    ): List<UserPublic> = com.example.trackhub.searchUsers(accessToken, query)
+        query: String,
+        limit: Int = USER_PAGE_SIZE,
+        offset: Int = 0
+    ): List<UserPublic> = com.example.trackhub.searchUsers(accessToken, query, limit, offset)
 
-    suspend fun fetchMyFollowing(accessToken: String): List<FollowUser> =
-        com.example.trackhub.fetchMyFollowing(accessToken)
+    suspend fun fetchMyFollowing(
+        accessToken: String,
+        limit: Int = USER_PAGE_SIZE,
+        offset: Int = 0
+    ): List<FollowUser> = com.example.trackhub.fetchMyFollowing(accessToken, limit, offset)
 
     suspend fun followUser(
         userId: Int,

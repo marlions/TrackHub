@@ -27,8 +27,16 @@ class CommentsViewModel : ViewModel() {
     var errorText by mutableStateOf<String?>(null)
         private set
 
+    var hasMoreComments by mutableStateOf(true)
+        private set
+
+    var isLoadingMoreComments by mutableStateOf(false)
+        private set
+
+    private var commentsOffset = 0
+
     fun updateCommentText(value: String) {
-        commentText = value
+        commentText = value.take(MAX_COMMENT_LENGTH)
         errorText = null
     }
 
@@ -38,6 +46,9 @@ class CommentsViewModel : ViewModel() {
         isLoading = false
         isSending = false
         errorText = null
+        hasMoreComments = true
+        isLoadingMoreComments = false
+        commentsOffset = 0
     }
 
     fun loadComments(trackId: Int) {
@@ -46,7 +57,10 @@ class CommentsViewModel : ViewModel() {
             errorText = null
 
             try {
-                comments = repository.fetchComments(trackId)
+                val page = repository.fetchComments(trackId, COMMENT_PAGE_SIZE, 0)
+                comments = page
+                commentsOffset = page.size
+                hasMoreComments = page.size == COMMENT_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки комментариев"
             } finally {
@@ -55,10 +69,38 @@ class CommentsViewModel : ViewModel() {
         }
     }
 
+    fun loadMoreComments(trackId: Int) {
+        if (isLoading || isLoadingMoreComments || !hasMoreComments) return
+
+        viewModelScope.launch {
+            isLoadingMoreComments = true
+            errorText = null
+
+            try {
+                val page = repository.fetchComments(trackId, COMMENT_PAGE_SIZE, commentsOffset)
+                comments = appendUniqueComments(comments, page)
+                commentsOffset += page.size
+                hasMoreComments = page.size == COMMENT_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки комментариев"
+            } finally {
+                isLoadingMoreComments = false
+            }
+        }
+    }
+
+    private fun appendUniqueComments(current: List<TrackComment>, page: List<TrackComment>): List<TrackComment> {
+        if (page.isEmpty()) return current
+        val existingIds = current.mapTo(mutableSetOf()) { it.id }
+        return current + page.filter { it.id !in existingIds }
+    }
+
     fun sendComment(
         trackId: Int,
         accessToken: String
     ) {
+        if (isSending || isLoading) return
+
         val trimmedText = commentText.trim()
 
         if (trimmedText.isBlank()) {
@@ -66,7 +108,7 @@ class CommentsViewModel : ViewModel() {
             return
         }
 
-        if (trimmedText.length > 500) {
+        if (trimmedText.length > MAX_COMMENT_LENGTH) {
             errorText = "Комментарий должен быть не длиннее 500 символов"
             return
         }
@@ -78,7 +120,10 @@ class CommentsViewModel : ViewModel() {
             try {
                 repository.addComment(trackId, trimmedText, accessToken)
                 commentText = ""
-                comments = repository.fetchComments(trackId)
+                val page = repository.fetchComments(trackId, COMMENT_PAGE_SIZE, 0)
+                comments = page
+                commentsOffset = page.size
+                hasMoreComments = page.size == COMMENT_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка отправки комментария"
             } finally {
@@ -118,8 +163,23 @@ class PlaylistsViewModel : ViewModel() {
     var successText by mutableStateOf<String?>(null)
         private set
 
+    var hasMorePlaylists by mutableStateOf(true)
+        private set
+
+    var hasMorePlaylistTracks by mutableStateOf(true)
+        private set
+
+    var isLoadingMorePlaylists by mutableStateOf(false)
+        private set
+
+    var isLoadingMorePlaylistTracks by mutableStateOf(false)
+        private set
+
+    private var playlistsOffset = 0
+    private var playlistTracksOffset = 0
+
     fun updatePlaylistName(value: String) {
-        playlistName = value
+        playlistName = value.take(MAX_PLAYLIST_NAME_LENGTH)
         errorText = null
         successText = null
     }
@@ -130,12 +190,18 @@ class PlaylistsViewModel : ViewModel() {
     }
 
     fun loadPlaylists(accessToken: String) {
+        if (isLoading) return
+        playlistsOffset = 0
+
         viewModelScope.launch {
             isLoading = true
             errorText = null
 
             try {
-                playlists = repository.fetchPlaylists(accessToken)
+                val page = repository.fetchPlaylists(accessToken, PLAYLIST_PAGE_SIZE, 0)
+                playlists = page
+                playlistsOffset = page.size
+                hasMorePlaylists = page.size == PLAYLIST_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки плейлистов"
             } finally {
@@ -144,7 +210,28 @@ class PlaylistsViewModel : ViewModel() {
         }
     }
 
+    fun loadMorePlaylists(accessToken: String) {
+        if (isLoading || isLoadingMorePlaylists || !hasMorePlaylists) return
+
+        viewModelScope.launch {
+            isLoadingMorePlaylists = true
+            errorText = null
+
+            try {
+                val page = repository.fetchPlaylists(accessToken, PLAYLIST_PAGE_SIZE, playlistsOffset)
+                playlists = appendUniquePlaylists(playlists, page)
+                playlistsOffset += page.size
+                hasMorePlaylists = page.size == PLAYLIST_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки плейлистов"
+            } finally {
+                isLoadingMorePlaylists = false
+            }
+        }
+    }
+
     fun createPlaylist(accessToken: String) {
+        if (isLoading) return
         val trimmedName = playlistName.trim()
 
         if (trimmedName.isBlank()) {
@@ -152,7 +239,7 @@ class PlaylistsViewModel : ViewModel() {
             return
         }
 
-        if (trimmedName.length > 100) {
+        if (trimmedName.length > MAX_PLAYLIST_NAME_LENGTH) {
             errorText = "Название плейлиста должно быть не длиннее 100 символов"
             return
         }
@@ -180,6 +267,7 @@ class PlaylistsViewModel : ViewModel() {
         track: Track,
         accessToken: String
     ) {
+        if (isLoading) return
         viewModelScope.launch {
             isLoading = true
             errorText = null
@@ -212,13 +300,18 @@ class PlaylistsViewModel : ViewModel() {
         playlist: Playlist,
         accessToken: String
     ) {
+        if (isLoading) return
         viewModelScope.launch {
             isLoading = true
             errorText = null
 
             try {
                 selectedPlaylist = playlist
-                playlistTracks = repository.fetchPlaylistTracks(playlist.id, accessToken)
+                playlistTracksOffset = 0
+                val page = repository.fetchPlaylistTracks(playlist.id, accessToken, TRACK_PAGE_SIZE, 0)
+                playlistTracks = page
+                playlistTracksOffset = page.size
+                hasMorePlaylistTracks = page.size == TRACK_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки треков плейлиста"
             } finally {
@@ -227,9 +320,37 @@ class PlaylistsViewModel : ViewModel() {
         }
     }
 
+    fun loadMorePlaylistTracks(accessToken: String) {
+        val playlist = selectedPlaylist ?: return
+        if (isLoading || isLoadingMorePlaylistTracks || !hasMorePlaylistTracks) return
+
+        viewModelScope.launch {
+            isLoadingMorePlaylistTracks = true
+            errorText = null
+
+            try {
+                val page = repository.fetchPlaylistTracks(
+                    playlistId = playlist.id,
+                    accessToken = accessToken,
+                    limit = TRACK_PAGE_SIZE,
+                    offset = playlistTracksOffset
+                )
+                playlistTracks = appendUniqueTracks(playlistTracks, page)
+                playlistTracksOffset += page.size
+                hasMorePlaylistTracks = page.size == TRACK_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки треков плейлиста"
+            } finally {
+                isLoadingMorePlaylistTracks = false
+            }
+        }
+    }
+
     fun closeCurrentPlaylist() {
         selectedPlaylist = null
         playlistTracks = emptyList()
+        playlistTracksOffset = 0
+        hasMorePlaylistTracks = true
         selectedPlaylistTrackMenu = null
     }
 
@@ -245,6 +366,7 @@ class PlaylistsViewModel : ViewModel() {
         track: Track,
         accessToken: String
     ) {
+        if (isLoading) return
         val playlist = selectedPlaylist ?: return
 
         viewModelScope.launch {
@@ -283,6 +405,7 @@ class PlaylistsViewModel : ViewModel() {
     }
 
     fun deleteSelectedPlaylist(accessToken: String) {
+        if (isLoading) return
         val playlist = selectedPlaylistForDelete ?: return
 
         viewModelScope.launch {
@@ -306,6 +429,19 @@ class PlaylistsViewModel : ViewModel() {
             }
         }
     }
+
+
+    private fun appendUniquePlaylists(current: List<Playlist>, page: List<Playlist>): List<Playlist> {
+        if (page.isEmpty()) return current
+        val existingIds = current.mapTo(mutableSetOf()) { it.id }
+        return current + page.filter { it.id !in existingIds }
+    }
+
+    private fun appendUniqueTracks(current: List<Track>, page: List<Track>): List<Track> {
+        if (page.isEmpty()) return current
+        val existingIds = current.mapTo(mutableSetOf()) { it.id }
+        return current + page.filter { it.id !in existingIds }
+    }
 }
 
 class UsersViewModel : ViewModel() {
@@ -326,7 +462,22 @@ class UsersViewModel : ViewModel() {
     var errorText by mutableStateOf<String?>(null)
         private set
 
+    var hasMoreUsers by mutableStateOf(true)
+        private set
+
+    var hasMoreFollowing by mutableStateOf(true)
+        private set
+
+    var isLoadingMoreUsers by mutableStateOf(false)
+        private set
+
+    var isLoadingMoreFollowing by mutableStateOf(false)
+        private set
+
     private var searchJob: Job? = null
+    private var usersOffset = 0
+    private var followingOffset = 0
+    private var currentUsersQuery = ""
 
     fun updateQuery(
         value: String,
@@ -346,15 +497,24 @@ class UsersViewModel : ViewModel() {
         accessToken: String,
         searchText: String = query
     ) {
+        if (isLoading) return
+        currentUsersQuery = searchText
+        usersOffset = 0
+
         viewModelScope.launch {
             isLoading = true
             errorText = null
 
             try {
-                users = repository.searchUsers(
+                val page = repository.searchUsers(
                     accessToken = accessToken,
-                    query = searchText
+                    query = searchText,
+                    limit = USER_PAGE_SIZE,
+                    offset = 0
                 )
+                users = page
+                usersOffset = page.size
+                hasMoreUsers = page.size == USER_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка поиска пользователей"
             } finally {
@@ -363,11 +523,39 @@ class UsersViewModel : ViewModel() {
         }
     }
 
+    fun loadMoreUsers(accessToken: String) {
+        if (isLoading || isLoadingMoreUsers || !hasMoreUsers) return
+
+        viewModelScope.launch {
+            isLoadingMoreUsers = true
+            errorText = null
+
+            try {
+                val page = repository.searchUsers(
+                    accessToken = accessToken,
+                    query = currentUsersQuery,
+                    limit = USER_PAGE_SIZE,
+                    offset = usersOffset
+                )
+                users = appendUniqueUsers(users, page)
+                usersOffset += page.size
+                hasMoreUsers = page.size == USER_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка поиска пользователей"
+            } finally {
+                isLoadingMoreUsers = false
+            }
+        }
+    }
+
     fun toggleFollow(
         user: UserPublic,
         accessToken: String
     ) {
+        if (isLoading) return
+
         viewModelScope.launch {
+            isLoading = true
             errorText = null
 
             try {
@@ -390,17 +578,25 @@ class UsersViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка изменения подписки"
+            } finally {
+                isLoading = false
             }
         }
     }
 
     fun loadFollowing(accessToken: String) {
+        if (isLoading) return
+        followingOffset = 0
+
         viewModelScope.launch {
             isLoading = true
             errorText = null
 
             try {
-                following = repository.fetchMyFollowing(accessToken)
+                val page = repository.fetchMyFollowing(accessToken, USER_PAGE_SIZE, 0)
+                following = page
+                followingOffset = page.size
+                hasMoreFollowing = page.size == USER_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки подписок"
             } finally {
@@ -409,11 +605,34 @@ class UsersViewModel : ViewModel() {
         }
     }
 
+    fun loadMoreFollowing(accessToken: String) {
+        if (isLoading || isLoadingMoreFollowing || !hasMoreFollowing) return
+
+        viewModelScope.launch {
+            isLoadingMoreFollowing = true
+            errorText = null
+
+            try {
+                val page = repository.fetchMyFollowing(accessToken, USER_PAGE_SIZE, followingOffset)
+                following = appendUniqueFollowing(following, page)
+                followingOffset += page.size
+                hasMoreFollowing = page.size == USER_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки подписок"
+            } finally {
+                isLoadingMoreFollowing = false
+            }
+        }
+    }
+
     fun unfollowAndRemove(
         user: FollowUser,
         accessToken: String
     ) {
+        if (isLoading) return
+
         viewModelScope.launch {
+            isLoading = true
             errorText = null
 
             try {
@@ -431,7 +650,22 @@ class UsersViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка отписки"
+            } finally {
+                isLoading = false
             }
         }
     }
+
+    private fun appendUniqueUsers(current: List<UserPublic>, page: List<UserPublic>): List<UserPublic> {
+        if (page.isEmpty()) return current
+        val existingIds = current.mapTo(mutableSetOf()) { it.id }
+        return current + page.filter { it.id !in existingIds }
+    }
+
+    private fun appendUniqueFollowing(current: List<FollowUser>, page: List<FollowUser>): List<FollowUser> {
+        if (page.isEmpty()) return current
+        val existingIds = current.mapTo(mutableSetOf()) { it.id }
+        return current + page.filter { it.id !in existingIds }
+    }
+
 }

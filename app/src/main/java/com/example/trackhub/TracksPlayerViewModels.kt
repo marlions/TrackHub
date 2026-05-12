@@ -36,6 +36,30 @@ class TracksViewModel : ViewModel() {
     var errorText by mutableStateOf<String?>(null)
         private set
 
+    var hasMoreTracks by mutableStateOf(true)
+        private set
+
+    var hasMoreMyTracks by mutableStateOf(true)
+        private set
+
+    var hasMoreLikedTracks by mutableStateOf(true)
+        private set
+
+    var isLoadingMoreTracks by mutableStateOf(false)
+        private set
+
+    var isLoadingMoreMyTracks by mutableStateOf(false)
+        private set
+
+    var isLoadingMoreLikedTracks by mutableStateOf(false)
+        private set
+
+    private var activeTrackActionIds by mutableStateOf<Set<Int>>(emptySet())
+    private var tracksOffset = 0
+    private var myTracksOffset = 0
+    private var likedTracksOffset = 0
+    private var currentTracksQuery = ""
+
     fun updateSearchQuery(value: String) {
         searchQuery = value
     }
@@ -48,12 +72,25 @@ class TracksViewModel : ViewModel() {
         accessToken: String,
         query: String = searchQuery
     ) {
+        if (isLoading) return
+
+        currentTracksQuery = query
+        tracksOffset = 0
+
         viewModelScope.launch {
             isLoading = true
             errorText = null
 
             try {
-                tracks = repository.fetchTracks(query, accessToken)
+                val page = repository.fetchTracks(
+                    query = query,
+                    accessToken = accessToken,
+                    limit = TRACK_PAGE_SIZE,
+                    offset = 0
+                )
+                tracks = page
+                tracksOffset = page.size
+                hasMoreTracks = page.size == TRACK_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки треков"
             } finally {
@@ -62,13 +99,49 @@ class TracksViewModel : ViewModel() {
         }
     }
 
+    fun loadMoreTracks(accessToken: String) {
+        if (isLoading || isLoadingMoreTracks || !hasMoreTracks) return
+
+        viewModelScope.launch {
+            isLoadingMoreTracks = true
+            errorText = null
+
+            try {
+                val page = repository.fetchTracks(
+                    query = currentTracksQuery,
+                    accessToken = accessToken,
+                    limit = TRACK_PAGE_SIZE,
+                    offset = tracksOffset
+                )
+                tracks = appendUniqueTracks(tracks, page)
+                tracksOffset += page.size
+                hasMoreTracks = page.size == TRACK_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки следующей страницы"
+            } finally {
+                isLoadingMoreTracks = false
+            }
+        }
+    }
+
     fun loadMyTracks(accessToken: String) {
+        if (isLoading) return
+
+        myTracksOffset = 0
+
         viewModelScope.launch {
             isLoading = true
             errorText = null
 
             try {
-                myTracks = repository.fetchMyTracks(accessToken)
+                val page = repository.fetchMyTracks(
+                    accessToken = accessToken,
+                    limit = TRACK_PAGE_SIZE,
+                    offset = 0
+                )
+                myTracks = page
+                myTracksOffset = page.size
+                hasMoreMyTracks = page.size == TRACK_PAGE_SIZE
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки моих треков"
             } finally {
@@ -77,10 +150,38 @@ class TracksViewModel : ViewModel() {
         }
     }
 
+    fun loadMoreMyTracks(accessToken: String) {
+        if (isLoading || isLoadingMoreMyTracks || !hasMoreMyTracks) return
+
+        viewModelScope.launch {
+            isLoadingMoreMyTracks = true
+            errorText = null
+
+            try {
+                val page = repository.fetchMyTracks(
+                    accessToken = accessToken,
+                    limit = TRACK_PAGE_SIZE,
+                    offset = myTracksOffset
+                )
+                myTracks = appendUniqueTracks(myTracks, page)
+                myTracksOffset += page.size
+                hasMoreMyTracks = page.size == TRACK_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки моих треков"
+            } finally {
+                isLoadingMoreMyTracks = false
+            }
+        }
+    }
+
     fun loadLikedTracks(
         accessToken: String,
         silent: Boolean = true
     ) {
+        if (!silent && isLoading) return
+
+        likedTracksOffset = 0
+
         viewModelScope.launch {
             if (!silent) {
                 isLoading = true
@@ -88,7 +189,14 @@ class TracksViewModel : ViewModel() {
             }
 
             try {
-                likedTracks = repository.fetchLikedTracks(accessToken)
+                val page = repository.fetchLikedTracks(
+                    accessToken = accessToken,
+                    limit = TRACK_PAGE_SIZE,
+                    offset = 0
+                )
+                likedTracks = page
+                likedTracksOffset = page.size
+                hasMoreLikedTracks = page.size == TRACK_PAGE_SIZE
             } catch (e: Exception) {
                 if (!silent) {
                     errorText = e.message ?: "Ошибка загрузки любимых треков"
@@ -101,6 +209,30 @@ class TracksViewModel : ViewModel() {
         }
     }
 
+    fun loadMoreLikedTracks(accessToken: String) {
+        if (isLoading || isLoadingMoreLikedTracks || !hasMoreLikedTracks) return
+
+        viewModelScope.launch {
+            isLoadingMoreLikedTracks = true
+            errorText = null
+
+            try {
+                val page = repository.fetchLikedTracks(
+                    accessToken = accessToken,
+                    limit = TRACK_PAGE_SIZE,
+                    offset = likedTracksOffset
+                )
+                likedTracks = appendUniqueTracks(likedTracks, page)
+                likedTracksOffset += page.size
+                hasMoreLikedTracks = page.size == TRACK_PAGE_SIZE
+            } catch (e: Exception) {
+                errorText = e.message ?: "Ошибка загрузки любимых треков"
+            } finally {
+                isLoadingMoreLikedTracks = false
+            }
+        }
+    }
+
     fun refreshTracksSilently(
         accessToken: String,
         query: String = searchQuery,
@@ -109,8 +241,16 @@ class TracksViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 delay(900)
-                val freshTracks = repository.fetchTracks(query, accessToken)
+                val refreshLimit = tracks.size.coerceAtLeast(TRACK_PAGE_SIZE)
+                val freshTracks = repository.fetchTracks(
+                    query = query,
+                    accessToken = accessToken,
+                    limit = refreshLimit,
+                    offset = 0
+                )
                 tracks = freshTracks
+                tracksOffset = freshTracks.size
+                hasMoreTracks = freshTracks.size == refreshLimit
                 freshTracks.forEach(onTrackUpdated)
             } catch (_: Exception) {
                 // Тихое обновление не должно ломать интерфейс, если сервер временно недоступен.
@@ -123,6 +263,10 @@ class TracksViewModel : ViewModel() {
         accessToken: String,
         onTrackUpdated: (Track) -> Unit = {}
     ) {
+        if (track.id in activeTrackActionIds) return
+
+        activeTrackActionIds = activeTrackActionIds + track.id
+
         viewModelScope.launch {
             errorText = null
 
@@ -154,6 +298,8 @@ class TracksViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка лайка"
+            } finally {
+                activeTrackActionIds = activeTrackActionIds - track.id
             }
         }
     }
@@ -176,6 +322,8 @@ class TracksViewModel : ViewModel() {
                 onDeleted()
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка удаления трека"
+            } finally {
+                activeTrackActionIds = activeTrackActionIds - track.id
             }
         }
     }
@@ -202,6 +350,16 @@ class TracksViewModel : ViewModel() {
             .firstOrNull { it.id == trackId }
             ?.copy(playCount = newPlayCount)
             ?.let(onTrackUpdated)
+    }
+
+    private fun appendUniqueTracks(
+        current: List<Track>,
+        page: List<Track>
+    ): List<Track> {
+        if (page.isEmpty()) return current
+
+        val existingIds = current.mapTo(mutableSetOf()) { it.id }
+        return current + page.filter { it.id !in existingIds }
     }
 
     fun updateTrackLocally(

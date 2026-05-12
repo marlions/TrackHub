@@ -203,13 +203,16 @@ fun SearchTabScreen(
     errorText: String?,
     currentTrack: Track?,
     isPlaying: Boolean,
+    hasMoreTracks: Boolean,
+    isLoadingMoreTracks: Boolean,
     onSearchClick: () -> Unit,
     onAllTracksClick: () -> Unit,
     onPlayClick: (Track) -> Unit,
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit,
-    onMoreClick: (Track) -> Unit
+    onMoreClick: (Track) -> Unit,
+    onLoadMoreClick: () -> Unit
 ) {
     LaunchedEffect(searchQuery) {
         if (searchQuery.isBlank()) {
@@ -308,6 +311,15 @@ fun SearchTabScreen(
                 onAddToPlaylistClick = { onAddToPlaylistClick(track) },
                 onMoreClick = { onMoreClick(track) }
             )
+        }
+
+        if (hasMoreTracks && tracks.isNotEmpty()) {
+            item {
+                PaginationLoadMoreButton(
+                    isLoading = isLoadingMoreTracks,
+                    onClick = onLoadMoreClick
+                )
+            }
         }
 
         item {
@@ -577,12 +589,15 @@ fun LibraryTracksListScreen(
     tracks: List<Track>,
     currentTrack: Track?,
     isPlaying: Boolean,
+    hasMoreTracks: Boolean,
+    isLoadingMoreTracks: Boolean,
     onBack: () -> Unit,
     onPlayClick: (Track) -> Unit,
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit,
-    onMoreClick: (Track) -> Unit
+    onMoreClick: (Track) -> Unit,
+    onLoadMoreClick: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -646,6 +661,15 @@ fun LibraryTracksListScreen(
             )
         }
 
+        if (hasMoreTracks && tracks.isNotEmpty()) {
+            item {
+                PaginationLoadMoreButton(
+                    isLoading = isLoadingMoreTracks,
+                    onClick = onLoadMoreClick
+                )
+            }
+        }
+
         item {
             Spacer(modifier = Modifier.height(110.dp))
         }
@@ -705,6 +729,7 @@ fun CreateTabScreen(
     var author by remember { mutableStateOf("") }
     var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
     var selectedFileName by remember { mutableStateOf<String?>(null) }
+    var selectedFileSizeBytes by remember { mutableStateOf<Long?>(null) }
 
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -715,6 +740,7 @@ fun CreateTabScreen(
     ) { uri ->
         selectedFileUri = uri
         selectedFileName = uri?.let { getFileName(context, it) }
+        selectedFileSizeBytes = uri?.let { getFileSizeBytes(context, it).takeIf { size -> size >= 0L } }
         errorText = null
         successText = null
     }
@@ -782,7 +808,7 @@ fun CreateTabScreen(
                 TrackHubTextField(
                     value = title,
                     onValueChange = {
-                        title = it
+                        title = it.take(MAX_TRACK_TITLE_LENGTH)
                         errorText = null
                         successText = null
                     },
@@ -807,7 +833,7 @@ fun CreateTabScreen(
                 TrackHubTextField(
                     value = author,
                     onValueChange = {
-                        author = it
+                        author = it.take(MAX_TRACK_AUTHOR_LENGTH)
                         errorText = null
                         successText = null
                     },
@@ -826,6 +852,7 @@ fun CreateTabScreen(
 
                 AudioFilePickerCard(
                     selectedFileName = selectedFileName,
+                    selectedFileSizeBytes = selectedFileSizeBytes,
                     enabled = !isLoading,
                     onClick = {
                         filePickerLauncher.launch("audio/*")
@@ -850,7 +877,7 @@ fun CreateTabScreen(
                             return@uploadButton
                         }
 
-                        if (trimmedTitle.length > 100) {
+                        if (trimmedTitle.length > MAX_TRACK_TITLE_LENGTH) {
                             errorText = "Название трека должно быть не длиннее 100 символов"
                             return@uploadButton
                         }
@@ -860,13 +887,28 @@ fun CreateTabScreen(
                             return@uploadButton
                         }
 
-                        if (trimmedAuthor.length > 50) {
+                        if (trimmedAuthor.length > MAX_TRACK_AUTHOR_LENGTH) {
                             errorText = "Автор должен быть не длиннее 50 символов"
                             return@uploadButton
                         }
 
                         if (fileUri == null) {
                             errorText = "Выберите аудиофайл"
+                            return@uploadButton
+                        }
+
+                        val safeFileName = selectedFileName.orEmpty()
+                        val extension = safeFileName.substringAfterLast('.', "").lowercase()
+
+                        if (extension !in setOf("mp3", "wav")) {
+                            errorText = "Можно загрузить только MP3 или WAV файл"
+                            return@uploadButton
+                        }
+
+                        val fileSizeBytes = selectedFileSizeBytes ?: getFileSizeBytes(context, fileUri)
+
+                        if (fileSizeBytes > MAX_AUDIO_FILE_SIZE_BYTES) {
+                            errorText = "Размер аудиофайла не должен превышать 50 МБ"
                             return@uploadButton
                         }
 
@@ -888,6 +930,7 @@ fun CreateTabScreen(
                                 author = ""
                                 selectedFileUri = null
                                 selectedFileName = null
+                                selectedFileSizeBytes = null
                                 successText = "Трек успешно загружен"
 
                                 onUploadSuccess(uploadedTrack)
@@ -1017,6 +1060,7 @@ fun MiniAuthorIcon() {
 @Composable
 fun AudioFilePickerCard(
     selectedFileName: String?,
+    selectedFileSizeBytes: Long?,
     enabled: Boolean,
     onClick: () -> Unit
 ) {
@@ -1065,7 +1109,7 @@ fun AudioFilePickerCard(
             Spacer(modifier = Modifier.height(3.dp))
 
             Text(
-                text = "MP3 или WAV аудиофайл",
+                text = selectedFileSizeBytes?.let { "MP3/WAV • ${formatFileSize(it)}" } ?: "MP3 или WAV аудиофайл до 50 МБ",
                 color = TrackHubMutedText.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 lineHeight = 15.sp,
@@ -1369,6 +1413,39 @@ fun TrackHubSearchField(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun PaginationLoadMoreButton(
+    isLoading: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.48f))
+            .border(1.dp, TrackHubBorder, RoundedCornerShape(50))
+            .clickable(enabled = !isLoading, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                color = TrackHubGoldLight,
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp
+            )
+        } else {
+            Text(
+                text = "Загрузить ещё",
+                color = TrackHubGoldLight,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 

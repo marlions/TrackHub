@@ -133,6 +133,12 @@ fun CatalogScreen(
     val searchQuery = tracksViewModel.searchQuery
     val isLoading = tracksViewModel.isLoading
     val errorText = tracksViewModel.errorText
+    val hasMoreTracks = tracksViewModel.hasMoreTracks
+    val hasMoreMyTracks = tracksViewModel.hasMoreMyTracks
+    val hasMoreLikedTracks = tracksViewModel.hasMoreLikedTracks
+    val isLoadingMoreTracks = tracksViewModel.isLoadingMoreTracks
+    val isLoadingMoreMyTracks = tracksViewModel.isLoadingMoreMyTracks
+    val isLoadingMoreLikedTracks = tracksViewModel.isLoadingMoreLikedTracks
 
     val currentTrack = playerViewModel.currentTrack
     val isPlaying = playerViewModel.isPlaying
@@ -172,6 +178,18 @@ fun CatalogScreen(
             accessToken = accessToken,
             silent = silent
         )
+    }
+
+    fun loadMoreTracks() {
+        tracksViewModel.loadMoreTracks(accessToken)
+    }
+
+    fun loadMoreMyTracks() {
+        tracksViewModel.loadMoreMyTracks(accessToken)
+    }
+
+    fun loadMoreLikedTracks() {
+        tracksViewModel.loadMoreLikedTracks(accessToken)
     }
 
     fun playTrack(
@@ -423,6 +441,8 @@ fun CatalogScreen(
                             errorText = errorText,
                             currentTrack = currentTrack,
                             isPlaying = isPlaying,
+                            hasMoreTracks = hasMoreTracks,
+                            isLoadingMoreTracks = isLoadingMoreTracks,
                             onSearchClick = {
                                 loadTracks(searchQuery)
                             },
@@ -448,6 +468,9 @@ fun CatalogScreen(
                             },
                             onMoreClick = { track ->
                                 selectedTrackMenu = track
+                            },
+                            onLoadMoreClick = {
+                                loadMoreTracks()
                             }
                         )
                     }
@@ -493,6 +516,8 @@ fun CatalogScreen(
                                     tracks = likedTracks,
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying,
+                                    hasMoreTracks = hasMoreLikedTracks,
+                                    isLoadingMoreTracks = isLoadingMoreLikedTracks,
                                     onBack = {
                                         libraryInnerScreen = LibraryInnerScreen.MAIN
                                     },
@@ -514,6 +539,9 @@ fun CatalogScreen(
                                     },
                                     onMoreClick = { track ->
                                         selectedTrackMenu = track
+                                    },
+                                    onLoadMoreClick = {
+                                        loadMoreLikedTracks()
                                     }
                                 )
                             }
@@ -526,6 +554,8 @@ fun CatalogScreen(
                                     tracks = myTracks,
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying,
+                                    hasMoreTracks = hasMoreMyTracks,
+                                    isLoadingMoreTracks = isLoadingMoreMyTracks,
                                     onBack = {
                                         libraryInnerScreen = LibraryInnerScreen.MAIN
                                     },
@@ -547,6 +577,9 @@ fun CatalogScreen(
                                     },
                                     onMoreClick = { track ->
                                         selectedTrackMenu = track
+                                    },
+                                    onLoadMoreClick = {
+                                        loadMoreMyTracks()
                                     }
                                 )
                             }
@@ -559,6 +592,8 @@ fun CatalogScreen(
                                     tracks = tracks,
                                     currentTrack = currentTrack,
                                     isPlaying = isPlaying,
+                                    hasMoreTracks = hasMoreTracks,
+                                    isLoadingMoreTracks = isLoadingMoreTracks,
                                     onBack = {
                                         libraryInnerScreen = LibraryInnerScreen.MAIN
                                     },
@@ -580,6 +615,9 @@ fun CatalogScreen(
                                     },
                                     onMoreClick = { track ->
                                         selectedTrackMenu = track
+                                    },
+                                    onLoadMoreClick = {
+                                        loadMoreTracks()
                                     }
                                 )
                             }

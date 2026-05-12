@@ -228,6 +228,7 @@ fun ProfileScreen(
 
     var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var playlistsCount by remember { mutableStateOf<Int?>(null) }
+    var followingCount by remember { mutableStateOf<Int?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
 
@@ -237,8 +238,9 @@ fun ProfileScreen(
             errorText = null
 
             try {
-                userProfile = fetchCurrentUser(accessToken)
-                playlistsCount = fetchPlaylists(accessToken).size
+                userProfile = TrackHubRepository.fetchCurrentUser(accessToken)
+                playlistsCount = TrackHubRepository.fetchPlaylists(accessToken, limit = 100, offset = 0).size
+                followingCount = TrackHubRepository.fetchMyFollowing(accessToken, limit = 100, offset = 0).size
             } catch (e: Exception) {
                 errorText = e.message ?: "Ошибка загрузки профиля"
             } finally {
@@ -360,7 +362,8 @@ fun ProfileScreen(
                     ProfileStatsGrid(
                         tracksCount = tracksCount,
                         likedTracksCount = likedTracksCount,
-                        playlistsCount = playlistsCount
+                        playlistsCount = playlistsCount,
+                        followingCount = followingCount
                     )
                 }
             }
@@ -513,6 +516,8 @@ fun UserSearchScreen(
     val users = usersViewModel.users
     val isLoading = usersViewModel.isLoading
     val errorText = usersViewModel.errorText
+    val hasMoreUsers = usersViewModel.hasMoreUsers
+    val isLoadingMoreUsers = usersViewModel.isLoadingMoreUsers
 
     LaunchedEffect(Unit) {
         usersViewModel.loadUsers(
@@ -604,6 +609,7 @@ fun UserSearchScreen(
             items(items = users, key = { it.id }) { user ->
                 UserPublicCard(
                     user = user,
+                    enabled = !isLoading,
                     onFollowClick = {
                         usersViewModel.toggleFollow(
                             user = user,
@@ -611,6 +617,17 @@ fun UserSearchScreen(
                         )
                     }
                 )
+            }
+
+            if (hasMoreUsers && users.isNotEmpty()) {
+                item {
+                    PaginationLoadMoreButton(
+                        isLoading = isLoadingMoreUsers,
+                        onClick = {
+                            usersViewModel.loadMoreUsers(accessToken)
+                        }
+                    )
+                }
             }
 
             item {
@@ -630,6 +647,8 @@ fun FollowingScreen(
     val following = usersViewModel.following
     val isLoading = usersViewModel.isLoading
     val errorText = usersViewModel.errorText
+    val hasMoreFollowing = usersViewModel.hasMoreFollowing
+    val isLoadingMoreFollowing = usersViewModel.isLoadingMoreFollowing
 
     LaunchedEffect(Unit) {
         usersViewModel.loadFollowing(accessToken)
@@ -711,6 +730,7 @@ fun FollowingScreen(
             items(items = following, key = { it.id }) { user ->
                 FollowingUserCard(
                     user = user,
+                    enabled = !isLoading,
                     onUnfollowClick = {
                         usersViewModel.unfollowAndRemove(
                             user = user,
@@ -718,6 +738,17 @@ fun FollowingScreen(
                         )
                     }
                 )
+            }
+
+            if (hasMoreFollowing && following.isNotEmpty()) {
+                item {
+                    PaginationLoadMoreButton(
+                        isLoading = isLoadingMoreFollowing,
+                        onClick = {
+                            usersViewModel.loadMoreFollowing(accessToken)
+                        }
+                    )
+                }
             }
 
             item {
@@ -781,6 +812,7 @@ fun UserSearchField(
 @Composable
 fun UserPublicCard(
     user: UserPublic,
+    enabled: Boolean,
     onFollowClick: () -> Unit
 ) {
     Row(
@@ -836,6 +868,7 @@ fun UserPublicCard(
 
         FollowButton(
             isFollowing = user.isFollowing,
+            enabled = enabled,
             onClick = onFollowClick
         )
     }
@@ -844,6 +877,7 @@ fun UserPublicCard(
 @Composable
 fun FollowingUserCard(
     user: FollowUser,
+    enabled: Boolean,
     onUnfollowClick: () -> Unit
 ) {
     Row(
@@ -897,7 +931,7 @@ fun FollowingUserCard(
                 .clip(RoundedCornerShape(50))
                 .background(Color(0xFF2A0808).copy(alpha = 0.90f))
                 .border(1.dp, Color(0x66FF6B6B), RoundedCornerShape(50))
-                .clickable(onClick = onUnfollowClick)
+                .clickable(enabled = enabled, onClick = onUnfollowClick)
                 .padding(horizontal = 13.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -915,6 +949,7 @@ fun FollowingUserCard(
 @Composable
 fun FollowButton(
     isFollowing: Boolean,
+    enabled: Boolean,
     onClick: () -> Unit
 ) {
     Box(
@@ -933,7 +968,7 @@ fun FollowButton(
                 color = if (isFollowing) TrackHubBorder else TrackHubGoldLight,
                 shape = RoundedCornerShape(50)
             )
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 13.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -1072,7 +1107,8 @@ fun MiniUserSearchIcon(
 fun ProfileStatsGrid(
     tracksCount: Int,
     likedTracksCount: Int,
-    playlistsCount: Int?
+    playlistsCount: Int?,
+    followingCount: Int?
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1095,11 +1131,22 @@ fun ProfileStatsGrid(
             )
         }
 
-        ProfileStatCard(
-            title = "Плейлисты",
-            value = playlistsCount?.toString() ?: "—",
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            ProfileStatCard(
+                title = "Плейлисты",
+                value = playlistsCount?.toString() ?: "—",
+                modifier = Modifier.weight(1f)
+            )
+
+            ProfileStatCard(
+                title = "Подписки",
+                value = followingCount?.toString() ?: "—",
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 

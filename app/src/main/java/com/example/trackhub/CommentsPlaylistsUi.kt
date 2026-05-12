@@ -128,6 +128,8 @@ fun CommentsScreen(
     val isLoading = commentsViewModel.isLoading
     val isSending = commentsViewModel.isSending
     val errorText = commentsViewModel.errorText
+    val hasMoreComments = commentsViewModel.hasMoreComments
+    val isLoadingMoreComments = commentsViewModel.isLoadingMoreComments
 
     LaunchedEffect(track.id) {
         commentsViewModel.clearForTrack()
@@ -264,6 +266,17 @@ fun CommentsScreen(
                 CommentCard(comment = comment)
             }
 
+            if (hasMoreComments && comments.isNotEmpty()) {
+                item {
+                    PaginationLoadMoreButton(
+                        isLoading = isLoadingMoreComments,
+                        onClick = {
+                            commentsViewModel.loadMoreComments(track.id)
+                        }
+                    )
+                }
+            }
+
             item {
                 Spacer(modifier = Modifier.height(32.dp))
             }
@@ -333,43 +346,57 @@ fun CommentInputField(
     value: String,
     onValueChange: (String) -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(96.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.Black.copy(alpha = 0.70f))
-            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth()
     ) {
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = TextStyle(
-                color = TrackHubText,
-                fontSize = 16.sp,
-                lineHeight = 21.sp,
-                fontWeight = FontWeight.Medium
-            ),
-            cursorBrush = SolidColor(TrackHubGoldLight),
-            modifier = Modifier.fillMaxSize(),
-            decorationBox = { innerTextField ->
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.TopStart
-                ) {
-                    if (value.isBlank()) {
-                        Text(
-                            text = "Напишите комментарий...",
-                            color = TrackHubMutedText,
-                            fontSize = 16.sp,
-                            lineHeight = 21.sp
-                        )
-                    }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(96.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.Black.copy(alpha = 0.70f))
+                .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = { onValueChange(it.take(MAX_COMMENT_LENGTH)) },
+                textStyle = TextStyle(
+                    color = TrackHubText,
+                    fontSize = 16.sp,
+                    lineHeight = 21.sp,
+                    fontWeight = FontWeight.Medium
+                ),
+                cursorBrush = SolidColor(TrackHubGoldLight),
+                modifier = Modifier.fillMaxSize(),
+                decorationBox = { innerTextField ->
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.TopStart
+                    ) {
+                        if (value.isBlank()) {
+                            Text(
+                                text = "Напишите комментарий...",
+                                color = TrackHubMutedText,
+                                fontSize = 16.sp,
+                                lineHeight = 21.sp
+                            )
+                        }
 
-                    innerTextField()
+                        innerTextField()
+                    }
                 }
-            }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "${value.length} / $MAX_COMMENT_LENGTH",
+            color = if (value.length >= MAX_COMMENT_LENGTH) TrackHubGoldLight else TrackHubMutedText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.align(Alignment.End)
         )
     }
 }
@@ -534,6 +561,8 @@ fun AddToPlaylistScreen(
     val isLoading = playlistsViewModel.isLoading
     val errorText = playlistsViewModel.errorText
     val successText = playlistsViewModel.successText
+    val hasMorePlaylists = playlistsViewModel.hasMorePlaylists
+    val isLoadingMorePlaylists = playlistsViewModel.isLoadingMorePlaylists
 
     LaunchedEffect(track.id) {
         playlistsViewModel.clearStatus()
@@ -667,6 +696,17 @@ fun AddToPlaylistScreen(
                         )
                     }
                 )
+            }
+
+            if (hasMorePlaylists && playlists.isNotEmpty()) {
+                item {
+                    PaginationLoadMoreButton(
+                        isLoading = isLoadingMorePlaylists,
+                        onClick = {
+                            playlistsViewModel.loadMorePlaylists(accessToken)
+                        }
+                    )
+                }
             }
 
             item {
@@ -899,6 +939,10 @@ fun PlaylistsScreen(
     val selectedPlaylistForDelete = playlistsViewModel.selectedPlaylistForDelete
     val isLoading = playlistsViewModel.isLoading
     val errorText = playlistsViewModel.errorText
+    val hasMorePlaylists = playlistsViewModel.hasMorePlaylists
+    val hasMorePlaylistTracks = playlistsViewModel.hasMorePlaylistTracks
+    val isLoadingMorePlaylists = playlistsViewModel.isLoadingMorePlaylists
+    val isLoadingMorePlaylistTracks = playlistsViewModel.isLoadingMorePlaylistTracks
 
     LaunchedEffect(Unit) {
         playlistsViewModel.loadPlaylists(accessToken)
@@ -984,6 +1028,17 @@ fun PlaylistsScreen(
                             playlistsViewModel.selectPlaylistTrackMenu(track)
                         }
                     )
+                }
+
+                if (hasMorePlaylistTracks && playlistTracks.isNotEmpty()) {
+                    item {
+                        PaginationLoadMoreButton(
+                            isLoading = isLoadingMorePlaylistTracks,
+                            onClick = {
+                                playlistsViewModel.loadMorePlaylistTracks(accessToken)
+                            }
+                        )
+                    }
                 }
 
                 item {
@@ -1102,6 +1157,17 @@ fun PlaylistsScreen(
                     )
                 }
 
+                if (hasMorePlaylists && playlists.isNotEmpty()) {
+                    item {
+                        PaginationLoadMoreButton(
+                            isLoading = isLoadingMorePlaylists,
+                            onClick = {
+                                playlistsViewModel.loadMorePlaylists(accessToken)
+                            }
+                        )
+                    }
+                }
+
                 item {
                     Spacer(modifier = Modifier.height(110.dp))
                 }
@@ -1182,7 +1248,7 @@ fun PlaylistNameField(
 
         BasicTextField(
             value = value,
-            onValueChange = onValueChange,
+            onValueChange = { onValueChange(it.take(MAX_PLAYLIST_NAME_LENGTH)) },
             singleLine = true,
             textStyle = TextStyle(
                 color = TrackHubText,
