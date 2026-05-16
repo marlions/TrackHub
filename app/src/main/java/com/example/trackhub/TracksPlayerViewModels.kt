@@ -386,7 +386,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private val player = ExoPlayer.Builder(application).build()
     private var positionTickerJob: Job? = null
     private var playCountJob: Job? = null
-    private var playRegistrationToken = 0
+    private var playCountRegisteredForCurrentSession = false
+    private var lastAccessToken: String? = null
+    private var lastPlayCountCallback: ((trackId: Int, playCount: Int) -> Unit)? = null
 
     var playbackQueue by mutableStateOf<List<Track>>(emptyList())
         private set
@@ -437,6 +439,10 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         durationMs = 0L
         isPlaying = true
 
+        lastAccessToken = accessToken
+        lastPlayCountCallback = onPlayCountChanged
+        playCountRegisteredForCurrentSession = false
+
         startPositionTicker(
             accessToken = accessToken,
             onPlayCountChanged = onPlayCountChanged
@@ -455,9 +461,23 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         if (player.isPlaying) {
             player.pause()
             isPlaying = false
+            playCountJob?.cancel()
+            playCountJob = null
         } else {
             player.play()
             isPlaying = true
+
+            val token = lastAccessToken
+            val callback = lastPlayCountCallback
+            val trackId = currentTrack?.id
+
+            if (token != null && callback != null && trackId != null) {
+                schedulePlayCountRegistration(
+                    trackId = trackId,
+                    accessToken = token,
+                    onPlayCountChanged = callback
+                )
+            }
         }
     }
 
@@ -531,46 +551,34 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun pause() {
         player.pause()
         isPlaying = false
+        playCountJob?.cancel()
+        playCountJob = null
     }
-
 
     private fun schedulePlayCountRegistration(
         trackId: Int,
         accessToken: String,
         onPlayCountChanged: (trackId: Int, playCount: Int) -> Unit
     ) {
+        if (playCountRegisteredForCurrentSession) return
+
         playCountJob?.cancel()
-        val token = ++playRegistrationToken
-
         playCountJob = viewModelScope.launch {
-            var continuousPlaybackMs = 0L
+            delay(30_000)
 
-            while (currentTrack?.id == trackId && token == playRegistrationToken && continuousPlaybackMs < 30_000L) {
-                delay(500)
+            val activeTrack = currentTrack
 
-                if (currentTrack?.id != trackId || token != playRegistrationToken) {
-                    return@launch
+            if (activeTrack?.id == trackId && player.isPlaying && player.currentPosition >= 30_000L) {
+                try {
+                    val newPlayCount = repository.registerTrackPlay(trackId, accessToken)
+                    playCountRegisteredForCurrentSession = true
+                    updateCurrentTrack(trackId) { item ->
+                        item.copy(playCount = newPlayCount)
+                    }
+                    onPlayCountChanged(trackId, newPlayCount)
+                } catch (_: Exception) {
+                    // Воспроизведение не должно останавливаться, если счётчик прослушиваний временно не обновился.
                 }
-
-                continuousPlaybackMs = if (player.isPlaying) {
-                    continuousPlaybackMs + 500L
-                } else {
-                    0L
-                }
-            }
-
-            if (currentTrack?.id != trackId || token != playRegistrationToken) {
-                return@launch
-            }
-
-            try {
-                val newPlayCount = repository.registerTrackPlay(trackId, accessToken)
-                updateCurrentTrack(trackId) { item ->
-                    item.copy(playCount = newPlayCount)
-                }
-                onPlayCountChanged(trackId, newPlayCount)
-            } catch (_: Exception) {
-                // Воспроизведение не должно останавливаться, если счётчик прослушиваний временно не обновился.
             }
         }
     }

@@ -83,6 +83,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -116,17 +117,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 
-private val EmailPattern = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
-
-fun isValidEmail(value: String): Boolean {
-    return EmailPattern.matches(value.trim())
-}
-
 @Composable
 fun AuthScreen(
     onAuthSuccess: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
 
     var isRegisterMode by remember { mutableStateOf(false) }
 
@@ -141,7 +137,9 @@ fun AuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .dismissKeyboardOnBackgroundTap()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { focusManager.clearFocus() })
+            }
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
@@ -204,7 +202,9 @@ fun AuthScreen(
                         return@validateAndSubmit
                     }
 
-                    if (!isValidEmail(trimmedEmail)) {
+                    val emailRegex = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
+
+                    if (trimmedEmail.isBlank() || !emailRegex.matches(trimmedEmail)) {
                         errorText = "Введите корректный email"
                         return@validateAndSubmit
                     }

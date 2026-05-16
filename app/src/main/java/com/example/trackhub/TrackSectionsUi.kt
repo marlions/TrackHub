@@ -1,7 +1,5 @@
 package com.example.trackhub
 
-import android.graphics.BitmapFactory
-import androidx.compose.ui.graphics.asImageBitmap
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.Dp
@@ -33,6 +31,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.aspectRatio
@@ -81,6 +80,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -112,6 +112,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
+import java.net.URL
 import java.util.concurrent.TimeUnit
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.text.BasicTextField
@@ -125,7 +126,7 @@ fun LikedTracksSection(
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit,
-    onShuffleClick: () -> Unit = {}
+    onShuffleClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -151,15 +152,10 @@ fun LikedTracksSection(
                 modifier = Modifier.weight(1f)
             )
 
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onShuffleClick),
-                contentAlignment = Alignment.Center
-            ) {
-                ShuffleCircleIcon()
-            }
+            ShuffleCircleIcon(
+                enabled = tracks.isNotEmpty(),
+                onClick = onShuffleClick
+            )
         }
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -379,37 +375,6 @@ fun TrackCoverPlaceholder(
     track: Track,
     modifier: Modifier = Modifier
 ) {
-    val coverUrl = remember(track.coverImageUrl) {
-        track.coverImageUrl
-            ?.takeIf { it.isNotBlank() }
-            ?.let { url -> if (url.startsWith("http")) url else BASE_URL + url }
-    }
-
-    var imageBitmap by remember(coverUrl) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var imageFailed by remember(coverUrl) { mutableStateOf(false) }
-
-    LaunchedEffect(coverUrl) {
-        imageBitmap = null
-        imageFailed = false
-
-        if (coverUrl != null) {
-            imageBitmap = withContext(Dispatchers.IO) {
-                try {
-                    val connection = java.net.URL(coverUrl).openConnection().apply {
-                        connectTimeout = 5000
-                        readTimeout = 5000
-                    }
-                    connection.getInputStream().use { stream ->
-                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
-                    }
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            imageFailed = imageBitmap == null
-        }
-    }
-
     val colors = remember(track.id) {
         when (track.id % 5) {
             0 -> listOf(Color(0xFF3A0A0A), Color(0xFFD99B00))
@@ -420,6 +385,25 @@ fun TrackCoverPlaceholder(
         }
     }
 
+    var coverBitmap by remember(track.coverImageUrl) {
+        mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    }
+
+    LaunchedEffect(track.coverImageUrl) {
+        coverBitmap = null
+        val coverUrl = track.coverImageUrl
+        if (!coverUrl.isNullOrBlank()) {
+            coverBitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val fullUrl = if (coverUrl.startsWith("http")) coverUrl else BASE_URL + coverUrl
+                    URL(fullUrl).openStream().use { input ->
+                        BitmapFactory.decodeStream(input)?.asImageBitmap()
+                    }
+                }.getOrNull()
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
@@ -427,12 +411,13 @@ fun TrackCoverPlaceholder(
             .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp)),
         contentAlignment = Alignment.Center
     ) {
-        if (imageBitmap != null && !imageFailed) {
+        val bitmap = coverBitmap
+        if (bitmap != null) {
             Image(
-                bitmap = imageBitmap!!,
-                contentDescription = "Обложка трека",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                bitmap = bitmap,
+                contentDescription = track.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
         } else {
             Text(

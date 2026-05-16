@@ -106,7 +106,7 @@ private fun parseTrack(item: JSONObject): Track {
         fileSizeBytes = item.optLong("file_size_bytes", 0L),
         durationSeconds = item.optInt("duration_seconds", 0),
         playCount = item.optInt("play_count", 0),
-        coverImageUrl = item.optString("cover_image_url", "").takeIf { it.isNotBlank() && it != "null" }
+        coverImageUrl = item.optString("cover_image_url", "").takeIf { it.isNotBlank() }
     )
 }
 
@@ -624,7 +624,6 @@ suspend fun uploadTrack(
             uri = coverImageUri,
             mediaType = coverContentType
         )
-
         multipartBuilder.addFormDataPart("cover_image", coverFileName, coverRequestBody)
     }
 

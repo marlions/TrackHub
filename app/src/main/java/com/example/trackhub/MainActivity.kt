@@ -1,9 +1,10 @@
 package com.example.trackhub
 
 import android.os.Bundle
-import android.graphics.Color as AndroidColor
-import androidx.core.view.WindowCompat
+import android.graphics.Color
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
@@ -11,15 +12,6 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.example.trackhub.ui.theme.TrackHubTheme
 
 class MainActivity : ComponentActivity() {
-    private fun configureSystemBars() {
-        window.statusBarColor = AndroidColor.BLACK
-        window.navigationBarColor = AndroidColor.BLACK
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
-        }
-    }
-
     private val sessionViewModel: SessionViewModel by viewModels()
     private val tracksViewModel: TracksViewModel by viewModels()
     private val playerViewModel: PlayerViewModel by viewModels()
@@ -30,7 +22,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        configureSystemBars()
+
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.BLACK)
+        )
 
         setContent {
             TrackHubTheme {

@@ -83,6 +83,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -145,6 +146,7 @@ fun CatalogScreen(
     val currentPositionMs = playerViewModel.currentPositionMs
     val durationMs = playerViewModel.durationMs
     val playerVolume = playerViewModel.playerVolume
+    val focusManager = LocalFocusManager.current
 
     var currentTab by remember { mutableStateOf(MainTab.HOME) }
     var libraryInnerScreen by remember { mutableStateOf(LibraryInnerScreen.MAIN) }
@@ -236,45 +238,6 @@ fun CatalogScreen(
         )
     }
 
-    @Composable
-    fun PersistentPlayerScaffold(content: @Composable () -> Unit) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .dismissKeyboardOnBackgroundTap()
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    content()
-                }
-
-                currentTrack?.let { track ->
-                    TrackHubMiniPlayer(
-                        track = track,
-                        isPlaying = isPlaying,
-                        currentPositionMs = currentPositionMs,
-                        durationMs = durationMs,
-                        volume = playerVolume,
-                        onSeekTo = { positionMs -> playerViewModel.seekTo(positionMs) },
-                        onVolumeChange = { newVolume -> playerViewModel.changeVolume(newVolume) },
-                        onOpenPlayerClick = { showFullPlayerScreen = true },
-                        onPlayPauseClick = { togglePlayPause() }
-                    )
-                }
-            }
-        }
-    }
-
-    fun refreshMainTrackList() {
-        tracksViewModel.updateSearchQuery("")
-        loadTracks("")
-    }
-
     LaunchedEffect(Unit) {
         loadTracks()
         loadLikedTracks()
@@ -283,158 +246,44 @@ fun CatalogScreen(
     val selectedCommentsTrack = selectedTrackForComments
     val selectedPlaylistTrack = selectedTrackForPlaylist
 
-    if (selectedCommentsTrack != null) {
-        val closeComments = {
-            selectedTrackForComments = null
-            if (currentTab == MainTab.SEARCH) {
-                loadTracks(searchQuery)
-            } else {
-                refreshMainTrackList()
-            }
-        }
-
-        BackHandler {
-            closeComments()
-        }
-
-        PersistentPlayerScaffold {
-            CommentsScreen(
-            track = selectedCommentsTrack,
+    fun closeComments() {
+        selectedTrackForComments = null
+        tracksViewModel.refreshTracksSilently(
             accessToken = accessToken,
-            commentsViewModel = commentsViewModel,
-            onBack = closeComments
+            query = if (currentTab == MainTab.SEARCH) searchQuery else ""
         )
-        }
-        return
+    }
+
+    fun closePlaylistAdd() {
+        selectedTrackForPlaylist = null
+    }
+
+    if (selectedCommentsTrack != null) {
+        BackHandler { closeComments() }
     }
 
     if (selectedPlaylistTrack != null) {
-        val closePlaylistAdd = {
-            selectedTrackForPlaylist = null
-            if (currentTab == MainTab.SEARCH) {
-                loadTracks(searchQuery)
-            } else {
-                refreshMainTrackList()
-            }
-        }
-
-        BackHandler {
-            closePlaylistAdd()
-        }
-
-        PersistentPlayerScaffold {
-            AddToPlaylistScreen(
-            track = selectedPlaylistTrack,
-            accessToken = accessToken,
-            playlistsViewModel = playlistsViewModel,
-            onBack = closePlaylistAdd
-        )
-        }
-        return
+        BackHandler { closePlaylistAdd() }
     }
 
     if (showUserSearchScreen) {
-        BackHandler {
-            showUserSearchScreen = false
-        }
-
-        PersistentPlayerScaffold {
-            UserSearchScreen(
-            accessToken = accessToken,
-            usersViewModel = usersViewModel,
-            onBack = {
-                showUserSearchScreen = false
-            }
-        )
-        }
-        return
+        BackHandler { showUserSearchScreen = false }
     }
 
     if (showFollowingScreen) {
-        BackHandler {
-            showFollowingScreen = false
-        }
-
-        PersistentPlayerScaffold {
-            FollowingScreen(
-            accessToken = accessToken,
-            usersViewModel = usersViewModel,
-            onBack = {
-                showFollowingScreen = false
-            }
-        )
-        }
-        return
+        BackHandler { showFollowingScreen = false }
     }
 
     if (showProfileScreen) {
-        BackHandler {
-            showProfileScreen = false
-        }
-
-        PersistentPlayerScaffold {
-            ProfileScreen(
-            accessToken = accessToken,
-            tracksCount = tracks.size,
-            likedTracksCount = likedTracks.size,
-            onFindUsersClick = {
-                showUserSearchScreen = true
-            },
-            onFollowingClick = {
-                showFollowingScreen = true
-            },
-            onBack = {
-                showProfileScreen = false
-            },
-            onLogout = {
-                playerViewModel.pause()
-                showProfileScreen = false
-                onLogout()
-            }
-        )
-        }
-        return
-    }
-
-    if (showFullPlayerScreen && currentTrack != null) {
-        val track = currentTrack
-
-        TrackHubFullPlayerScreen(
-            track = track,
-            isPlaying = isPlaying,
-            currentPositionMs = currentPositionMs,
-            durationMs = durationMs,
-            volume = playerVolume,
-            isLiked = track.isLiked,
-            onBack = {
-                showFullPlayerScreen = false
-            },
-            onLikeClick = {
-                likeAndReload(track)
-            },
-            onSeekTo = { positionMs ->
-                playerViewModel.seekTo(positionMs)
-            },
-            onVolumeChange = { newVolume ->
-                playerViewModel.changeVolume(newVolume)
-            },
-            onPlayPauseClick = {
-                togglePlayPause()
-            },
-            onPreviousClick = {
-                playAdjacentTrack(-1)
-            },
-            onNextClick = {
-                playAdjacentTrack(1)
-            }
-        )
-        return
+        BackHandler { showProfileScreen = false }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .dismissKeyboardOnBackgroundTap()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { focusManager.clearFocus() })
+            }
             .background(Color.Black)
     ) {
         GoldBackgroundDecorations()
@@ -453,7 +302,65 @@ fun CatalogScreen(
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                when (currentTab) {
+                when {
+                    selectedCommentsTrack != null -> {
+                        CommentsScreen(
+                            track = selectedCommentsTrack,
+                            accessToken = accessToken,
+                            commentsViewModel = commentsViewModel,
+                            onBack = { closeComments() }
+                        )
+                    }
+
+                    selectedPlaylistTrack != null -> {
+                        AddToPlaylistScreen(
+                            track = selectedPlaylistTrack,
+                            accessToken = accessToken,
+                            playlistsViewModel = playlistsViewModel,
+                            onBack = { closePlaylistAdd() }
+                        )
+                    }
+
+                    showUserSearchScreen -> {
+                        UserSearchScreen(
+                            accessToken = accessToken,
+                            usersViewModel = usersViewModel,
+                            onBack = { showUserSearchScreen = false }
+                        )
+                    }
+
+                    showFollowingScreen -> {
+                        FollowingScreen(
+                            accessToken = accessToken,
+                            usersViewModel = usersViewModel,
+                            onBack = { showFollowingScreen = false }
+                        )
+                    }
+
+                    showProfileScreen -> {
+                        ProfileScreen(
+                            accessToken = accessToken,
+                            tracksCount = tracks.size,
+                            likedTracksCount = likedTracks.size,
+                            onFindUsersClick = {
+                                showUserSearchScreen = true
+                            },
+                            onFollowingClick = {
+                                showFollowingScreen = true
+                            },
+                            onBack = {
+                                showProfileScreen = false
+                            },
+                            onLogout = {
+                                playerViewModel.pause()
+                                showProfileScreen = false
+                                onLogout()
+                            }
+                        )
+                    }
+
+                    else -> {
+                        when (currentTab) {
                     MainTab.HOME -> {
                         HomeTabScreen(
                             tracks = tracks,
@@ -461,12 +368,11 @@ fun CatalogScreen(
                             isLoading = isLoading,
                             errorText = errorText,
                             onRetry = {
-                                refreshMainTrackList()
+                                loadTracks(searchQuery)
                             },
                             onShowAllClick = {
                                 currentTab = MainTab.LIBRARY
                                 libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
-                                refreshMainTrackList()
                             },
                             onLogout = {
                                 showProfileScreen = true
@@ -487,9 +393,14 @@ fun CatalogScreen(
                                 selectedTrackMenu = track
                             },
                             onShuffleLikedClick = {
-                                val queue = if (likedTracks.isNotEmpty()) likedTracks else tracks.filter { it.isLiked }
-                                queue.shuffled().firstOrNull()?.let { randomTrack ->
-                                    playTrack(randomTrack, queue)
+                                val shuffleSource = if (likedTracks.isNotEmpty()) {
+                                    likedTracks
+                                } else {
+                                    tracks.filter { it.isLiked }
+                                }
+
+                                shuffleSource.shuffled().firstOrNull()?.let { randomTrack ->
+                                    playTrack(randomTrack, shuffleSource)
                                 }
                             }
                         )
@@ -512,7 +423,8 @@ fun CatalogScreen(
                                 loadTracks(searchQuery)
                             },
                             onAllTracksClick = {
-                                refreshMainTrackList()
+                                tracksViewModel.updateSearchQuery("")
+                                loadTracks("")
                             },
                             onPlayClick = { track ->
                                 if (currentTrack?.id == track.id) {
@@ -558,7 +470,6 @@ fun CatalogScreen(
                                     },
                                     onAllTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
-                                        refreshMainTrackList()
                                     }
                                 )
                             }
@@ -697,6 +608,8 @@ fun CatalogScreen(
                             }
                         )
                     }
+                        }
+                    }
                 }
             }
 
@@ -718,6 +631,12 @@ fun CatalogScreen(
                     },
                     onPlayPauseClick = {
                         togglePlayPause()
+                    },
+                    onPreviousClick = {
+                        playAdjacentTrack(-1)
+                    },
+                    onNextClick = {
+                        playAdjacentTrack(1)
                     }
                 )
             }
@@ -725,19 +644,19 @@ fun CatalogScreen(
             TrackHubBottomNavigation(
                 currentTab = currentTab,
                 onTabClick = { tab ->
-                    val wasSearch = currentTab == MainTab.SEARCH
+                    selectedTrackForComments = null
+                    selectedTrackForPlaylist = null
+                    showUserSearchScreen = false
+                    showFollowingScreen = false
+                    showProfileScreen = false
 
-                    if (tab == MainTab.LIBRARY) {
-                        libraryInnerScreen = LibraryInnerScreen.MAIN
-                    } else {
-                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                    if (tab != MainTab.SEARCH && searchQuery.isNotBlank()) {
+                        tracksViewModel.updateSearchQuery("")
+                        loadTracks("")
                     }
 
                     currentTab = tab
-
-                    if (wasSearch && tab != MainTab.SEARCH) {
-                        refreshMainTrackList()
-                    }
+                    libraryInnerScreen = LibraryInnerScreen.MAIN
                 }
             )
         }
@@ -785,6 +704,40 @@ fun CatalogScreen(
                 onConfirm = {
                     trackPendingDelete = null
                     deleteTrackAndReload(track)
+                }
+            )
+        }
+
+        if (showFullPlayerScreen && currentTrack != null) {
+            val track = currentTrack
+
+            TrackHubFullPlayerScreen(
+                track = track,
+                isPlaying = isPlaying,
+                currentPositionMs = currentPositionMs,
+                durationMs = durationMs,
+                volume = playerVolume,
+                isLiked = track.isLiked,
+                onBack = {
+                    showFullPlayerScreen = false
+                },
+                onLikeClick = {
+                    likeAndReload(track)
+                },
+                onSeekTo = { positionMs ->
+                    playerViewModel.seekTo(positionMs)
+                },
+                onVolumeChange = { newVolume ->
+                    playerViewModel.changeVolume(newVolume)
+                },
+                onPlayPauseClick = {
+                    togglePlayPause()
+                },
+                onPreviousClick = {
+                    playAdjacentTrack(-1)
+                },
+                onNextClick = {
+                    playAdjacentTrack(1)
                 }
             )
         }

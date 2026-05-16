@@ -215,12 +215,12 @@ fun SearchTabScreen(
     onLoadMoreClick: () -> Unit
 ) {
     LaunchedEffect(searchQuery) {
-        delay(450)
         if (searchQuery.isBlank()) {
-            onAllTracksClick()
-        } else {
-            onSearchClick()
+            return@LaunchedEffect
         }
+
+        delay(450)
+        onSearchClick()
     }
 
     LazyColumn(
@@ -732,7 +732,6 @@ fun CreateTabScreen(
     var selectedFileSizeBytes by remember { mutableStateOf<Long?>(null) }
     var selectedCoverUri by remember { mutableStateOf<Uri?>(null) }
     var selectedCoverName by remember { mutableStateOf<String?>(null) }
-    var selectedCoverSizeBytes by remember { mutableStateOf<Long?>(null) }
 
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -753,7 +752,6 @@ fun CreateTabScreen(
     ) { uri ->
         selectedCoverUri = uri
         selectedCoverName = uri?.let { getFileName(context, it) }
-        selectedCoverSizeBytes = uri?.let { getFileSizeBytes(context, it).takeIf { size -> size >= 0L } }
         errorText = null
         successText = null
     }
@@ -828,18 +826,7 @@ fun CreateTabScreen(
                     placeholder = "Введите название трека",
                     keyboardType = KeyboardType.Text,
                     leadingContent = {
-                        Box(
-                            modifier = Modifier.size(20.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "♪",
-                                color = TrackHubGoldLight,
-                                fontSize = 18.sp,
-                                lineHeight = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        CenteredMusicNoteIcon(size = 21.dp)
                     }
                 )
 
@@ -885,8 +872,7 @@ fun CreateTabScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 CoverImagePickerCard(
-                    selectedFileName = selectedCoverName,
-                    selectedFileSizeBytes = selectedCoverSizeBytes,
+                    selectedCoverName = selectedCoverName,
                     enabled = !isLoading,
                     onClick = {
                         coverPickerLauncher.launch("image/*")
@@ -894,7 +880,6 @@ fun CreateTabScreen(
                     onClearClick = {
                         selectedCoverUri = null
                         selectedCoverName = null
-                        selectedCoverSizeBytes = null
                     }
                 )
 
@@ -951,21 +936,12 @@ fun CreateTabScreen(
                             return@uploadButton
                         }
 
-                        val coverUri = selectedCoverUri
-                        if (coverUri != null) {
-                            val coverName = selectedCoverName.orEmpty()
-                            val coverExtension = coverName.substringAfterLast('.', "").lowercase()
+                        val safeCoverName = selectedCoverName.orEmpty()
+                        val coverExtension = safeCoverName.substringAfterLast('.', "").lowercase()
 
-                            if (coverExtension !in setOf("jpg", "jpeg", "png", "webp")) {
-                                errorText = "Фото трека должно быть JPG, PNG или WEBP"
-                                return@uploadButton
-                            }
-
-                            val coverSizeBytes = selectedCoverSizeBytes ?: getFileSizeBytes(context, coverUri)
-                            if (coverSizeBytes > MAX_TRACK_COVER_SIZE_BYTES) {
-                                errorText = "Фото трека не должно превышать 5 МБ"
-                                return@uploadButton
-                            }
+                        if (selectedCoverUri != null && coverExtension !in setOf("jpg", "jpeg", "png", "webp")) {
+                            errorText = "Фото трека должно быть JPG, PNG или WEBP"
+                            return@uploadButton
                         }
 
                         scope.launch {
@@ -979,7 +955,7 @@ fun CreateTabScreen(
                                     title = trimmedTitle,
                                     author = trimmedAuthor,
                                     fileUri = fileUri,
-                                    coverImageUri = coverUri,
+                                    coverImageUri = selectedCoverUri,
                                     accessToken = accessToken
                                 )
 
@@ -990,7 +966,6 @@ fun CreateTabScreen(
                                 selectedFileSizeBytes = null
                                 selectedCoverUri = null
                                 selectedCoverName = null
-                                selectedCoverSizeBytes = null
                                 successText = "Трек успешно загружен"
 
                                 onUploadSuccess(uploadedTrack)
@@ -1062,12 +1037,7 @@ fun CreateTrackIcon() {
             .border(1.3.dp, TrackHubGoldLight, RoundedCornerShape(16.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = "♪",
-            color = TrackHubGoldLight,
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Bold
-        )
+        CenteredMusicNoteIcon(size = 28.dp)
     }
 }
 
@@ -1114,6 +1084,157 @@ fun MiniAuthorIcon() {
                 cap = StrokeCap.Round
             )
         )
+    }
+}
+
+@Composable
+fun CenteredMusicNoteIcon(
+    size: androidx.compose.ui.unit.Dp = 22.dp,
+    color: Color = TrackHubGoldLight
+) {
+    Canvas(modifier = Modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = w * 0.105f
+
+        drawLine(
+            color = color,
+            start = Offset(w * 0.58f, h * 0.16f),
+            end = Offset(w * 0.58f, h * 0.68f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        drawLine(
+            color = color,
+            start = Offset(w * 0.58f, h * 0.16f),
+            end = Offset(w * 0.82f, h * 0.24f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        drawCircle(
+            color = color,
+            radius = w * 0.17f,
+            center = Offset(w * 0.39f, h * 0.70f)
+        )
+    }
+}
+
+@Composable
+fun CoverImagePickerCard(
+    selectedCoverName: String?,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    onClearClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(68.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.70f))
+            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ImageFrameUploadIcon()
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = selectedCoverName ?: "Выбрать фото трека",
+                color = if (selectedCoverName == null) TrackHubMutedText else TrackHubText,
+                fontSize = 15.sp,
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = "JPG, PNG или WEBP",
+                color = TrackHubMutedText.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        if (selectedCoverName != null) {
+            Text(
+                text = "Убрать",
+                color = TrackHubMutedText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(enabled = enabled, onClick = onClearClick)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+            )
+        } else {
+            Text(
+                text = "Выбрать",
+                color = TrackHubGoldLight,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun ImageFrameUploadIcon() {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(TrackHubGold.copy(alpha = 0.10f))
+            .border(1.dp, TrackHubGoldLight, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.size(22.dp)) {
+            val color = TrackHubGoldLight
+            val stroke = 2.0f
+            val w = size.width
+            val h = size.height
+
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(w * 0.08f, h * 0.14f),
+                size = Size(w * 0.84f, h * 0.72f),
+                cornerRadius = CornerRadius(w * 0.10f, w * 0.10f),
+                style = Stroke(width = stroke)
+            )
+
+            drawCircle(
+                color = color,
+                radius = w * 0.09f,
+                center = Offset(w * 0.70f, h * 0.32f)
+            )
+
+            val mountain = Path().apply {
+                moveTo(w * 0.18f, h * 0.76f)
+                lineTo(w * 0.38f, h * 0.52f)
+                lineTo(w * 0.52f, h * 0.66f)
+                lineTo(w * 0.64f, h * 0.50f)
+                lineTo(w * 0.84f, h * 0.76f)
+            }
+
+            drawPath(
+                path = mountain,
+                color = color,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+        }
     }
 }
 
@@ -1185,88 +1306,6 @@ fun AudioFilePickerCard(
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold
         )
-    }
-}
-
-@Composable
-fun CoverImagePickerCard(
-    selectedFileName: String?,
-    selectedFileSizeBytes: Long?,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    onClearClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(68.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.Black.copy(alpha = 0.70f))
-            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(TrackHubGold.copy(alpha = 0.10f))
-                .border(1.dp, TrackHubGoldLight, RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "▣",
-                color = TrackHubGoldLight,
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = selectedFileName ?: "Добавить фото трека",
-                color = if (selectedFileName == null) TrackHubMutedText else TrackHubText,
-                fontSize = 15.sp,
-                lineHeight = 18.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-            )
-
-            Spacer(modifier = Modifier.height(3.dp))
-
-            Text(
-                text = selectedFileSizeBytes?.let { "JPG/PNG/WEBP • ${formatFileSize(it)}" } ?: "Необязательно • до 5 МБ",
-                color = TrackHubMutedText.copy(alpha = 0.85f),
-                fontSize = 12.sp,
-                lineHeight = 15.sp,
-                maxLines = 1
-            )
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        if (selectedFileName != null) {
-            Text(
-                text = "Убрать",
-                color = TrackHubGoldLight,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(enabled = enabled) { onClearClick() }
-            )
-        } else {
-            Text(
-                text = "Выбрать",
-                color = TrackHubGoldLight,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
     }
 }
 
@@ -1684,9 +1723,15 @@ fun HeartStackIcon() {
 }
 
 @Composable
-fun ShuffleCircleIcon() {
+fun ShuffleCircleIcon(
+    enabled: Boolean = true,
+    onClick: () -> Unit = {}
+) {
     Box(
-        modifier = Modifier.size(44.dp),
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         TrackHubPngIcon(

@@ -1,5 +1,11 @@
 package com.example.trackhub
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.AnimatedContent
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.ui.unit.Dp
@@ -75,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -111,11 +118,11 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.graphics.graphicsLayer
 
 @Composable
 fun TrackHubFullPlayerScreen(
@@ -142,16 +149,36 @@ fun TrackHubFullPlayerScreen(
     var dragOffsetY by remember(track.id) { mutableStateOf(0f) }
     var horizontalDragTotal by remember(track.id) { mutableStateOf(0f) }
     var verticalDragTotal by remember(track.id) { mutableStateOf(0f) }
+    var slideDirection by remember { mutableStateOf(1) }
 
-    BackHandler {
-        onBack()
+    val animatedDragOffsetY by animateFloatAsState(
+        targetValue = dragOffsetY,
+        animationSpec = tween(durationMillis = 120),
+        label = "FullPlayerVerticalDrag"
+    )
+
+    fun goNext() {
+        slideDirection = 1
+        showVolumeSlider = false
+        onNextClick()
+    }
+
+    fun goPrevious() {
+        slideDirection = -1
+        showVolumeSlider = false
+        onPreviousClick()
     }
 
     LaunchedEffect(track.id) {
         showVolumeSlider = false
+        showTrackInfo = false
         dragOffsetY = 0f
         horizontalDragTotal = 0f
         verticalDragTotal = 0f
+    }
+
+    BackHandler {
+        onBack()
     }
 
     LaunchedEffect(currentPositionMs, durationMs, isSeeking) {
@@ -162,7 +189,7 @@ fun TrackHubFullPlayerScreen(
         }
     }
 
-    LaunchedEffect(showVolumeSlider, volume) {
+    LaunchedEffect(showVolumeSlider, volume, track.id) {
         if (showVolumeSlider) {
             delay(3000)
             showVolumeSlider = false
@@ -172,26 +199,35 @@ fun TrackHubFullPlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { translationY = dragOffsetY }
             .pointerInput(track.id) {
                 detectDragGestures(
                     onDragStart = {
                         horizontalDragTotal = 0f
                         verticalDragTotal = 0f
                     },
-                    onDrag = { _, dragAmount ->
+                    onDrag = { change, dragAmount ->
                         horizontalDragTotal += dragAmount.x
                         verticalDragTotal += dragAmount.y
-                        if (verticalDragTotal > 0f && kotlin.math.abs(verticalDragTotal) > kotlin.math.abs(horizontalDragTotal)) {
+
+                        if (abs(verticalDragTotal) > abs(horizontalDragTotal) && verticalDragTotal > 0f) {
                             dragOffsetY = verticalDragTotal.coerceAtLeast(0f)
                         }
                     },
                     onDragEnd = {
                         when {
-                            verticalDragTotal > 130f && kotlin.math.abs(verticalDragTotal) > kotlin.math.abs(horizontalDragTotal) -> onBack()
-                            horizontalDragTotal < -140f && kotlin.math.abs(horizontalDragTotal) > kotlin.math.abs(verticalDragTotal) -> onNextClick()
-                            horizontalDragTotal > 140f && kotlin.math.abs(horizontalDragTotal) > kotlin.math.abs(verticalDragTotal) -> onPreviousClick()
+                            verticalDragTotal > 140f && abs(verticalDragTotal) > abs(horizontalDragTotal) -> {
+                                onBack()
+                            }
+
+                            horizontalDragTotal < -120f && abs(horizontalDragTotal) > abs(verticalDragTotal) -> {
+                                goNext()
+                            }
+
+                            horizontalDragTotal > 120f && abs(horizontalDragTotal) > abs(verticalDragTotal) -> {
+                                goPrevious()
+                            }
                         }
+
                         dragOffsetY = 0f
                         horizontalDragTotal = 0f
                         verticalDragTotal = 0f
@@ -203,6 +239,108 @@ fun TrackHubFullPlayerScreen(
                     }
                 )
             }
+    ) {
+        AnimatedContent(
+            targetState = track,
+            transitionSpec = {
+                if (slideDirection >= 0) {
+                    (slideInHorizontally(
+                        animationSpec = tween(durationMillis = 320),
+                        initialOffsetX = { fullWidth -> fullWidth }
+                    ) + fadeIn(animationSpec = tween(durationMillis = 120))) togetherWith
+                        (slideOutHorizontally(
+                            animationSpec = tween(durationMillis = 320),
+                            targetOffsetX = { fullWidth -> -fullWidth }
+                        ) + fadeOut(animationSpec = tween(durationMillis = 120)))
+                } else {
+                    (slideInHorizontally(
+                        animationSpec = tween(durationMillis = 320),
+                        initialOffsetX = { fullWidth -> -fullWidth }
+                    ) + fadeIn(animationSpec = tween(durationMillis = 120))) togetherWith
+                        (slideOutHorizontally(
+                            animationSpec = tween(durationMillis = 320),
+                            targetOffsetX = { fullWidth -> fullWidth }
+                        ) + fadeOut(animationSpec = tween(durationMillis = 120)))
+                }
+            },
+            label = "FullPlayerTrackSlide",
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = animatedDragOffsetY
+                    alpha = (1f - (animatedDragOffsetY / 900f)).coerceIn(0.70f, 1f)
+                }
+        ) { animatedTrack ->
+            TrackHubFullPlayerContent(
+                track = animatedTrack,
+                isPlaying = animatedTrack.id == track.id && isPlaying,
+                sliderPosition = if (animatedTrack.id == track.id) sliderPosition else 0f,
+                durationMs = if (animatedTrack.id == track.id) durationMs else (animatedTrack.durationSeconds * 1000L),
+                safeDurationMs = if (animatedTrack.id == track.id) safeDurationMs else (animatedTrack.durationSeconds * 1000L).coerceAtLeast(1L),
+                volume = volume,
+                isLiked = animatedTrack.isLiked,
+                showVolumeSlider = animatedTrack.id == track.id && showVolumeSlider,
+                showTrackInfo = animatedTrack.id == track.id && showTrackInfo,
+                onBack = onBack,
+                onTrackInfoClick = {
+                    showTrackInfo = true
+                },
+                onDismissTrackInfo = {
+                    showTrackInfo = false
+                },
+                onLikeClick = onLikeClick,
+                onSeekValueChange = { value ->
+                    if (animatedTrack.id == track.id) {
+                        isSeeking = true
+                        sliderPosition = value.coerceIn(0f, safeDurationMs.toFloat())
+                    }
+                },
+                onSeekFinished = {
+                    if (animatedTrack.id == track.id) {
+                        onSeekTo(sliderPosition.toLong())
+                        isSeeking = false
+                    }
+                },
+                onToggleVolume = {
+                    showVolumeSlider = !showVolumeSlider
+                },
+                onVolumeChange = { newVolume ->
+                    onVolumeChange(newVolume.coerceIn(0f, 1f))
+                },
+                onPlayPauseClick = onPlayPauseClick,
+                onPreviousClick = ::goPrevious,
+                onNextClick = ::goNext
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrackHubFullPlayerContent(
+    track: Track,
+    isPlaying: Boolean,
+    sliderPosition: Float,
+    durationMs: Long,
+    safeDurationMs: Long,
+    volume: Float,
+    isLiked: Boolean,
+    showVolumeSlider: Boolean,
+    showTrackInfo: Boolean,
+    onBack: () -> Unit,
+    onTrackInfoClick: () -> Unit,
+    onDismissTrackInfo: () -> Unit,
+    onLikeClick: () -> Unit,
+    onSeekValueChange: (Float) -> Unit,
+    onSeekFinished: () -> Unit,
+    onToggleVolume: () -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    onPlayPauseClick: () -> Unit,
+    onPreviousClick: () -> Unit,
+    onNextClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
@@ -249,9 +387,7 @@ fun TrackHubFullPlayerScreen(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .clickable {
-                            showTrackInfo = true
-                        },
+                        .clickable(onClick = onTrackInfoClick),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -325,14 +461,8 @@ fun TrackHubFullPlayerScreen(
 
             TrackHubCompactSlider(
                 value = sliderPosition.coerceIn(0f, safeDurationMs.toFloat()),
-                onValueChange = { value ->
-                    isSeeking = true
-                    sliderPosition = value.coerceIn(0f, safeDurationMs.toFloat())
-                },
-                onValueChangeFinished = {
-                    onSeekTo(sliderPosition.toLong())
-                    isSeeking = false
-                },
+                onValueChange = onSeekValueChange,
+                onValueChangeFinished = onSeekFinished,
                 valueRange = 0f..safeDurationMs.toFloat(),
                 enabled = durationMs > 0L,
                 modifier = Modifier
@@ -413,9 +543,7 @@ fun TrackHubFullPlayerScreen(
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.22f))
                         .border(1.dp, TrackHubGold.copy(alpha = 0.70f), CircleShape)
-                        .clickable {
-                            showVolumeSlider = !showVolumeSlider
-                        },
+                        .clickable(onClick = onToggleVolume),
                     contentAlignment = Alignment.Center
                 ) {
                     MiniVolumeIcon(
@@ -433,9 +561,7 @@ fun TrackHubFullPlayerScreen(
 
                         TrackHubCompactSlider(
                             value = volume.coerceIn(0f, 1f),
-                            onValueChange = { newVolume ->
-                                onVolumeChange(newVolume.coerceIn(0f, 1f))
-                            },
+                            onValueChange = onVolumeChange,
                             valueRange = 0f..1f,
                             enabled = true,
                             modifier = Modifier
@@ -452,9 +578,7 @@ fun TrackHubFullPlayerScreen(
         if (showTrackInfo) {
             TrackInfoDialog(
                 track = track,
-                onDismiss = {
-                    showTrackInfo = false
-                }
+                onDismiss = onDismissTrackInfo
             )
         }
     }
@@ -662,19 +786,29 @@ fun TrackHubMiniPlayer(
     onSeekTo: (Long) -> Unit,
     onVolumeChange: (Float) -> Unit,
     onOpenPlayerClick: () -> Unit,
-    onPlayPauseClick: () -> Unit
+    onPlayPauseClick: () -> Unit,
+    onPreviousClick: () -> Unit,
+    onNextClick: () -> Unit
 ) {
     val safeDurationMs = durationMs.coerceAtLeast(1L)
 
     var isSeeking by remember(track.id) { mutableStateOf(false) }
     var sliderPosition by remember(track.id) { mutableStateOf(0f) }
-    var showVolumeSlider by remember { mutableStateOf(false) }
+    var showVolumeSlider by remember(track.id) { mutableStateOf(false) }
+    var horizontalDragTotal by remember(track.id) { mutableStateOf(0f) }
+    var verticalDragTotal by remember(track.id) { mutableStateOf(0f) }
+    var slideDirection by remember { mutableStateOf(1) }
 
-    LaunchedEffect(track.id) {
+    fun goNext() {
+        slideDirection = 1
         showVolumeSlider = false
-        dragOffsetY = 0f
-        horizontalDragTotal = 0f
-        verticalDragTotal = 0f
+        onNextClick()
+    }
+
+    fun goPrevious() {
+        slideDirection = -1
+        showVolumeSlider = false
+        onPreviousClick()
     }
 
     LaunchedEffect(currentPositionMs, durationMs, isSeeking) {
@@ -685,18 +819,134 @@ fun TrackHubMiniPlayer(
         }
     }
 
-    LaunchedEffect(showVolumeSlider, volume) {
+    LaunchedEffect(showVolumeSlider, volume, track.id) {
         if (showVolumeSlider) {
             delay(3000)
             showVolumeSlider = false
         }
     }
 
-    Column(
+    LaunchedEffect(track.id) {
+        showVolumeSlider = false
+        horizontalDragTotal = 0f
+        verticalDragTotal = 0f
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 18.dp)
             .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .pointerInput(track.id) {
+                detectDragGestures(
+                    onDragStart = {
+                        horizontalDragTotal = 0f
+                        verticalDragTotal = 0f
+                    },
+                    onDrag = { change, dragAmount ->
+                        horizontalDragTotal += dragAmount.x
+                        verticalDragTotal += dragAmount.y
+                    },
+                    onDragEnd = {
+                        when {
+                            horizontalDragTotal < -90f && abs(horizontalDragTotal) > abs(verticalDragTotal) -> {
+                                goNext()
+                            }
+
+                            horizontalDragTotal > 90f && abs(horizontalDragTotal) > abs(verticalDragTotal) -> {
+                                goPrevious()
+                            }
+                        }
+
+                        horizontalDragTotal = 0f
+                        verticalDragTotal = 0f
+                    },
+                    onDragCancel = {
+                        horizontalDragTotal = 0f
+                        verticalDragTotal = 0f
+                    }
+                )
+            }
+    ) {
+        AnimatedContent(
+            targetState = track,
+            transitionSpec = {
+                if (slideDirection >= 0) {
+                    (slideInHorizontally(
+                        animationSpec = tween(durationMillis = 280),
+                        initialOffsetX = { fullWidth -> fullWidth }
+                    ) + fadeIn(animationSpec = tween(durationMillis = 120))) togetherWith
+                        (slideOutHorizontally(
+                            animationSpec = tween(durationMillis = 280),
+                            targetOffsetX = { fullWidth -> -fullWidth }
+                        ) + fadeOut(animationSpec = tween(durationMillis = 120)))
+                } else {
+                    (slideInHorizontally(
+                        animationSpec = tween(durationMillis = 280),
+                        initialOffsetX = { fullWidth -> -fullWidth }
+                    ) + fadeIn(animationSpec = tween(durationMillis = 120))) togetherWith
+                        (slideOutHorizontally(
+                            animationSpec = tween(durationMillis = 280),
+                            targetOffsetX = { fullWidth -> fullWidth }
+                        ) + fadeOut(animationSpec = tween(durationMillis = 120)))
+                }
+            },
+            label = "MiniPlayerTrackSlide",
+            modifier = Modifier.fillMaxWidth()
+        ) { animatedTrack ->
+            TrackHubMiniPlayerContent(
+                track = animatedTrack,
+                isPlaying = animatedTrack.id == track.id && isPlaying,
+                sliderPosition = if (animatedTrack.id == track.id) sliderPosition else 0f,
+                durationMs = if (animatedTrack.id == track.id) durationMs else (animatedTrack.durationSeconds * 1000L),
+                safeDurationMs = if (animatedTrack.id == track.id) safeDurationMs else (animatedTrack.durationSeconds * 1000L).coerceAtLeast(1L),
+                volume = volume,
+                showVolumeSlider = animatedTrack.id == track.id && showVolumeSlider,
+                onSeekValueChange = { value ->
+                    if (animatedTrack.id == track.id) {
+                        isSeeking = true
+                        sliderPosition = value.coerceIn(0f, safeDurationMs.toFloat())
+                    }
+                },
+                onSeekFinished = {
+                    if (animatedTrack.id == track.id) {
+                        onSeekTo(sliderPosition.toLong())
+                        isSeeking = false
+                    }
+                },
+                onToggleVolume = {
+                    showVolumeSlider = !showVolumeSlider
+                },
+                onVolumeChange = { newVolume ->
+                    onVolumeChange(newVolume.coerceIn(0f, 1f))
+                },
+                onOpenPlayerClick = onOpenPlayerClick,
+                onPlayPauseClick = onPlayPauseClick
+            )
+        }
+    }
+}
+
+@Composable
+private fun TrackHubMiniPlayerContent(
+    track: Track,
+    isPlaying: Boolean,
+    sliderPosition: Float,
+    durationMs: Long,
+    safeDurationMs: Long,
+    volume: Float,
+    showVolumeSlider: Boolean,
+    onSeekValueChange: (Float) -> Unit,
+    onSeekFinished: () -> Unit,
+    onToggleVolume: () -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    onOpenPlayerClick: () -> Unit,
+    onPlayPauseClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(
                 Brush.horizontalGradient(
@@ -759,9 +1009,7 @@ fun TrackHubMiniPlayer(
                 ) {
                     TrackHubCompactSlider(
                         value = volume.coerceIn(0f, 1f),
-                        onValueChange = { newVolume ->
-                            onVolumeChange(newVolume.coerceIn(0f, 1f))
-                        },
+                        onValueChange = onVolumeChange,
                         valueRange = 0f..1f,
                         enabled = true,
                         modifier = Modifier
@@ -781,9 +1029,7 @@ fun TrackHubMiniPlayer(
                     .clip(CircleShape)
                     .background(Color.Black.copy(alpha = 0.26f))
                     .border(1.dp, TrackHubGold.copy(alpha = 0.62f), CircleShape)
-                    .clickable {
-                        showVolumeSlider = !showVolumeSlider
-                    },
+                    .clickable(onClick = onToggleVolume),
                 contentAlignment = Alignment.Center
             ) {
                 MiniVolumeIcon(
@@ -836,14 +1082,8 @@ fun TrackHubMiniPlayer(
 
             TrackHubCompactSlider(
                 value = sliderPosition.coerceIn(0f, safeDurationMs.toFloat()),
-                onValueChange = { value ->
-                    isSeeking = true
-                    sliderPosition = value.coerceIn(0f, safeDurationMs.toFloat())
-                },
-                onValueChangeFinished = {
-                    onSeekTo(sliderPosition.toLong())
-                    isSeeking = false
-                },
+                onValueChange = onSeekValueChange,
+                onValueChangeFinished = onSeekFinished,
                 valueRange = 0f..safeDurationMs.toFloat(),
                 enabled = durationMs > 0L,
                 modifier = Modifier
