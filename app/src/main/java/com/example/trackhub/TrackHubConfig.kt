@@ -2,7 +2,23 @@ package com.example.trackhub
 
 import androidx.compose.ui.graphics.Color
 
-const val BASE_URL = "http://10.0.2.2:8000"
+const val EMULATOR_BASE_URL = "http://10.0.2.2:8000"
+
+// Адрес backend для реального телефона.
+// Замени 192.168.1.100 на IPv4-адрес своего компьютера в Wi‑Fi сети.
+// Пример запуска backend для телефона:
+// uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+const val REAL_DEVICE_BASE_URL = "http://188.243.145.106:8080"
+
+// false — запуск на Android Emulator.
+// true  — запуск на реальном телефоне.
+const val USE_REAL_DEVICE_BACKEND = true
+
+val BASE_URL: String = if (USE_REAL_DEVICE_BACKEND) {
+    REAL_DEVICE_BASE_URL
+} else {
+    EMULATOR_BASE_URL
+}
 const val SESSION_PREFS_NAME = "trackhub_session"
 const val SESSION_ACCESS_TOKEN_KEY = "access_token"
 
