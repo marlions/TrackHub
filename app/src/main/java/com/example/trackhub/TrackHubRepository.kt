@@ -64,8 +64,9 @@ object TrackHubRepository {
         title: String,
         author: String,
         fileUri: Uri,
+        coverImageUri: Uri? = null,
         accessToken: String
-    ): Track = com.example.trackhub.uploadTrack(context, title, author, fileUri, accessToken)
+    ): Track = com.example.trackhub.uploadTrack(context, title, author, fileUri, coverImageUri, accessToken)
 
     suspend fun fetchComments(
         trackId: Int,

@@ -105,7 +105,8 @@ private fun parseTrack(item: JSONObject): Track {
         createdAt = item.optString("created_at", ""),
         fileSizeBytes = item.optLong("file_size_bytes", 0L),
         durationSeconds = item.optInt("duration_seconds", 0),
-        playCount = item.optInt("play_count", 0)
+        playCount = item.optInt("play_count", 0),
+        coverImageUrl = item.optString("cover_image_url", "").takeIf { it.isNotBlank() && it != "null" }
     )
 }
 
@@ -597,6 +598,7 @@ suspend fun uploadTrack(
     title: String,
     author: String,
     fileUri: Uri,
+    coverImageUri: Uri? = null,
     accessToken: String
 ): Track {
     val fileName = getFileName(context, fileUri).replace("\"", "")
@@ -608,12 +610,25 @@ suspend fun uploadTrack(
         mediaType = contentType
     )
 
-    val multipartBody = MultipartBody.Builder()
+    val multipartBuilder = MultipartBody.Builder()
         .setType(MultipartBody.FORM)
         .addFormDataPart("title", title)
         .addFormDataPart("author", author)
         .addFormDataPart("file", fileName, fileRequestBody)
-        .build()
+
+    if (coverImageUri != null) {
+        val coverFileName = getFileName(context, coverImageUri).replace("\"", "")
+        val coverContentType = context.contentResolver.getType(coverImageUri) ?: "image/jpeg"
+        val coverRequestBody = UriRequestBody(
+            context = context,
+            uri = coverImageUri,
+            mediaType = coverContentType
+        )
+
+        multipartBuilder.addFormDataPart("cover_image", coverFileName, coverRequestBody)
+    }
+
+    val multipartBody = multipartBuilder.build()
 
     val request = Request.Builder()
         .url(buildUrl("/api/tracks/upload"))

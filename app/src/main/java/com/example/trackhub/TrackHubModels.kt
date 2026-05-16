@@ -11,7 +11,8 @@ data class Track(
     val createdAt: String,
     val fileSizeBytes: Long,
     val durationSeconds: Int,
-    val playCount: Int
+    val playCount: Int,
+    val coverImageUrl: String? = null
 )
 
 data class TrackComment(

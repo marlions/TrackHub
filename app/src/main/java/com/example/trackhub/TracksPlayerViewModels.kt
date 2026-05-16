@@ -385,6 +385,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     private val player = ExoPlayer.Builder(application).build()
     private var positionTickerJob: Job? = null
+    private var playCountJob: Job? = null
+    private var playRegistrationToken = 0
 
     var playbackQueue by mutableStateOf<List<Track>>(emptyList())
         private set
@@ -440,17 +442,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             onPlayCountChanged = onPlayCountChanged
         )
 
-        viewModelScope.launch {
-            try {
-                val newPlayCount = repository.registerTrackPlay(track.id, accessToken)
-                updateCurrentTrack(track.id) { item ->
-                    item.copy(playCount = newPlayCount)
-                }
-                onPlayCountChanged(track.id, newPlayCount)
-            } catch (_: Exception) {
-                // Воспроизведение не должно останавливаться, если счётчик прослушиваний временно не обновился.
-            }
-        }
+        schedulePlayCountRegistration(
+            trackId = track.id,
+            accessToken = accessToken,
+            onPlayCountChanged = onPlayCountChanged
+        )
     }
 
     fun togglePlayPause() {
@@ -527,12 +523,56 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             durationMs = 0L
             positionTickerJob?.cancel()
             positionTickerJob = null
+            playCountJob?.cancel()
+            playCountJob = null
         }
     }
 
     fun pause() {
         player.pause()
         isPlaying = false
+    }
+
+
+    private fun schedulePlayCountRegistration(
+        trackId: Int,
+        accessToken: String,
+        onPlayCountChanged: (trackId: Int, playCount: Int) -> Unit
+    ) {
+        playCountJob?.cancel()
+        val token = ++playRegistrationToken
+
+        playCountJob = viewModelScope.launch {
+            var continuousPlaybackMs = 0L
+
+            while (currentTrack?.id == trackId && token == playRegistrationToken && continuousPlaybackMs < 30_000L) {
+                delay(500)
+
+                if (currentTrack?.id != trackId || token != playRegistrationToken) {
+                    return@launch
+                }
+
+                continuousPlaybackMs = if (player.isPlaying) {
+                    continuousPlaybackMs + 500L
+                } else {
+                    0L
+                }
+            }
+
+            if (currentTrack?.id != trackId || token != playRegistrationToken) {
+                return@launch
+            }
+
+            try {
+                val newPlayCount = repository.registerTrackPlay(trackId, accessToken)
+                updateCurrentTrack(trackId) { item ->
+                    item.copy(playCount = newPlayCount)
+                }
+                onPlayCountChanged(trackId, newPlayCount)
+            } catch (_: Exception) {
+                // Воспроизведение не должно останавливаться, если счётчик прослушиваний временно не обновился.
+            }
+        }
     }
 
     private fun startPositionTicker(
@@ -569,6 +609,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         positionTickerJob?.cancel()
+        playCountJob?.cancel()
         player.release()
         super.onCleared()
     }

@@ -236,6 +236,45 @@ fun CatalogScreen(
         )
     }
 
+    @Composable
+    fun PersistentPlayerScaffold(content: @Composable () -> Unit) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .dismissKeyboardOnBackgroundTap()
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    content()
+                }
+
+                currentTrack?.let { track ->
+                    TrackHubMiniPlayer(
+                        track = track,
+                        isPlaying = isPlaying,
+                        currentPositionMs = currentPositionMs,
+                        durationMs = durationMs,
+                        volume = playerVolume,
+                        onSeekTo = { positionMs -> playerViewModel.seekTo(positionMs) },
+                        onVolumeChange = { newVolume -> playerViewModel.changeVolume(newVolume) },
+                        onOpenPlayerClick = { showFullPlayerScreen = true },
+                        onPlayPauseClick = { togglePlayPause() }
+                    )
+                }
+            }
+        }
+    }
+
+    fun refreshMainTrackList() {
+        tracksViewModel.updateSearchQuery("")
+        loadTracks("")
+    }
+
     LaunchedEffect(Unit) {
         loadTracks()
         loadLikedTracks()
@@ -247,38 +286,50 @@ fun CatalogScreen(
     if (selectedCommentsTrack != null) {
         val closeComments = {
             selectedTrackForComments = null
-            loadTracks(searchQuery)
+            if (currentTab == MainTab.SEARCH) {
+                loadTracks(searchQuery)
+            } else {
+                refreshMainTrackList()
+            }
         }
 
         BackHandler {
             closeComments()
         }
 
-        CommentsScreen(
+        PersistentPlayerScaffold {
+            CommentsScreen(
             track = selectedCommentsTrack,
             accessToken = accessToken,
             commentsViewModel = commentsViewModel,
             onBack = closeComments
         )
+        }
         return
     }
 
     if (selectedPlaylistTrack != null) {
         val closePlaylistAdd = {
             selectedTrackForPlaylist = null
-            loadTracks(searchQuery)
+            if (currentTab == MainTab.SEARCH) {
+                loadTracks(searchQuery)
+            } else {
+                refreshMainTrackList()
+            }
         }
 
         BackHandler {
             closePlaylistAdd()
         }
 
-        AddToPlaylistScreen(
+        PersistentPlayerScaffold {
+            AddToPlaylistScreen(
             track = selectedPlaylistTrack,
             accessToken = accessToken,
             playlistsViewModel = playlistsViewModel,
             onBack = closePlaylistAdd
         )
+        }
         return
     }
 
@@ -287,13 +338,15 @@ fun CatalogScreen(
             showUserSearchScreen = false
         }
 
-        UserSearchScreen(
+        PersistentPlayerScaffold {
+            UserSearchScreen(
             accessToken = accessToken,
             usersViewModel = usersViewModel,
             onBack = {
                 showUserSearchScreen = false
             }
         )
+        }
         return
     }
 
@@ -302,13 +355,15 @@ fun CatalogScreen(
             showFollowingScreen = false
         }
 
-        FollowingScreen(
+        PersistentPlayerScaffold {
+            FollowingScreen(
             accessToken = accessToken,
             usersViewModel = usersViewModel,
             onBack = {
                 showFollowingScreen = false
             }
         )
+        }
         return
     }
 
@@ -317,7 +372,8 @@ fun CatalogScreen(
             showProfileScreen = false
         }
 
-        ProfileScreen(
+        PersistentPlayerScaffold {
+            ProfileScreen(
             accessToken = accessToken,
             tracksCount = tracks.size,
             likedTracksCount = likedTracks.size,
@@ -336,6 +392,7 @@ fun CatalogScreen(
                 onLogout()
             }
         )
+        }
         return
     }
 
@@ -377,6 +434,7 @@ fun CatalogScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .dismissKeyboardOnBackgroundTap()
             .background(Color.Black)
     ) {
         GoldBackgroundDecorations()
@@ -403,11 +461,12 @@ fun CatalogScreen(
                             isLoading = isLoading,
                             errorText = errorText,
                             onRetry = {
-                                loadTracks(searchQuery)
+                                refreshMainTrackList()
                             },
                             onShowAllClick = {
                                 currentTab = MainTab.LIBRARY
                                 libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
+                                refreshMainTrackList()
                             },
                             onLogout = {
                                 showProfileScreen = true
@@ -426,6 +485,12 @@ fun CatalogScreen(
                             },
                             onMoreClick = { track ->
                                 selectedTrackMenu = track
+                            },
+                            onShuffleLikedClick = {
+                                val queue = if (likedTracks.isNotEmpty()) likedTracks else tracks.filter { it.isLiked }
+                                queue.shuffled().firstOrNull()?.let { randomTrack ->
+                                    playTrack(randomTrack, queue)
+                                }
                             }
                         )
                     }
@@ -447,8 +512,7 @@ fun CatalogScreen(
                                 loadTracks(searchQuery)
                             },
                             onAllTracksClick = {
-                                tracksViewModel.updateSearchQuery("")
-                                loadTracks("")
+                                refreshMainTrackList()
                             },
                             onPlayClick = { track ->
                                 if (currentTrack?.id == track.id) {
@@ -494,6 +558,7 @@ fun CatalogScreen(
                                     },
                                     onAllTracksClick = {
                                         libraryInnerScreen = LibraryInnerScreen.ALL_TRACKS
+                                        refreshMainTrackList()
                                     }
                                 )
                             }
@@ -660,10 +725,18 @@ fun CatalogScreen(
             TrackHubBottomNavigation(
                 currentTab = currentTab,
                 onTabClick = { tab ->
+                    val wasSearch = currentTab == MainTab.SEARCH
+
+                    if (tab == MainTab.LIBRARY) {
+                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                    } else {
+                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                    }
+
                     currentTab = tab
 
-                    if (tab != MainTab.LIBRARY) {
-                        libraryInnerScreen = LibraryInnerScreen.MAIN
+                    if (wasSearch && tab != MainTab.SEARCH) {
+                        refreshMainTrackList()
                     }
                 }
             )

@@ -115,6 +115,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.graphics.graphicsLayer
 
 @Composable
 fun TrackHubFullPlayerScreen(
@@ -136,11 +137,21 @@ fun TrackHubFullPlayerScreen(
 
     var isSeeking by remember(track.id) { mutableStateOf(false) }
     var sliderPosition by remember(track.id) { mutableStateOf(0f) }
-    var showVolumeSlider by remember(track.id) { mutableStateOf(true) }
+    var showVolumeSlider by remember(track.id) { mutableStateOf(false) }
     var showTrackInfo by remember(track.id) { mutableStateOf(false) }
+    var dragOffsetY by remember(track.id) { mutableStateOf(0f) }
+    var horizontalDragTotal by remember(track.id) { mutableStateOf(0f) }
+    var verticalDragTotal by remember(track.id) { mutableStateOf(0f) }
 
     BackHandler {
         onBack()
+    }
+
+    LaunchedEffect(track.id) {
+        showVolumeSlider = false
+        dragOffsetY = 0f
+        horizontalDragTotal = 0f
+        verticalDragTotal = 0f
     }
 
     LaunchedEffect(currentPositionMs, durationMs, isSeeking) {
@@ -161,6 +172,37 @@ fun TrackHubFullPlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer { translationY = dragOffsetY }
+            .pointerInput(track.id) {
+                detectDragGestures(
+                    onDragStart = {
+                        horizontalDragTotal = 0f
+                        verticalDragTotal = 0f
+                    },
+                    onDrag = { _, dragAmount ->
+                        horizontalDragTotal += dragAmount.x
+                        verticalDragTotal += dragAmount.y
+                        if (verticalDragTotal > 0f && kotlin.math.abs(verticalDragTotal) > kotlin.math.abs(horizontalDragTotal)) {
+                            dragOffsetY = verticalDragTotal.coerceAtLeast(0f)
+                        }
+                    },
+                    onDragEnd = {
+                        when {
+                            verticalDragTotal > 130f && kotlin.math.abs(verticalDragTotal) > kotlin.math.abs(horizontalDragTotal) -> onBack()
+                            horizontalDragTotal < -140f && kotlin.math.abs(horizontalDragTotal) > kotlin.math.abs(verticalDragTotal) -> onNextClick()
+                            horizontalDragTotal > 140f && kotlin.math.abs(horizontalDragTotal) > kotlin.math.abs(verticalDragTotal) -> onPreviousClick()
+                        }
+                        dragOffsetY = 0f
+                        horizontalDragTotal = 0f
+                        verticalDragTotal = 0f
+                    },
+                    onDragCancel = {
+                        dragOffsetY = 0f
+                        horizontalDragTotal = 0f
+                        verticalDragTotal = 0f
+                    }
+                )
+            }
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
@@ -627,6 +669,13 @@ fun TrackHubMiniPlayer(
     var isSeeking by remember(track.id) { mutableStateOf(false) }
     var sliderPosition by remember(track.id) { mutableStateOf(0f) }
     var showVolumeSlider by remember { mutableStateOf(false) }
+
+    LaunchedEffect(track.id) {
+        showVolumeSlider = false
+        dragOffsetY = 0f
+        horizontalDragTotal = 0f
+        verticalDragTotal = 0f
+    }
 
     LaunchedEffect(currentPositionMs, durationMs, isSeeking) {
         if (!isSeeking) {

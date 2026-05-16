@@ -215,12 +215,12 @@ fun SearchTabScreen(
     onLoadMoreClick: () -> Unit
 ) {
     LaunchedEffect(searchQuery) {
-        if (searchQuery.isBlank()) {
-            return@LaunchedEffect
-        }
-
         delay(450)
-        onSearchClick()
+        if (searchQuery.isBlank()) {
+            onAllTracksClick()
+        } else {
+            onSearchClick()
+        }
     }
 
     LazyColumn(
@@ -383,7 +383,7 @@ fun SearchTrackResultCard(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Лайков: ${track.likesCount} · Комментариев: ${track.commentsCount}",
+                    text = "Лайки: ${track.likesCount} · Комм.: ${track.commentsCount}",
                     color = TrackHubMutedText.copy(alpha = 0.85f),
                     fontSize = 12.sp,
                     maxLines = 1
@@ -730,6 +730,9 @@ fun CreateTabScreen(
     var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
     var selectedFileName by remember { mutableStateOf<String?>(null) }
     var selectedFileSizeBytes by remember { mutableStateOf<Long?>(null) }
+    var selectedCoverUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedCoverName by remember { mutableStateOf<String?>(null) }
+    var selectedCoverSizeBytes by remember { mutableStateOf<Long?>(null) }
 
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -741,6 +744,16 @@ fun CreateTabScreen(
         selectedFileUri = uri
         selectedFileName = uri?.let { getFileName(context, it) }
         selectedFileSizeBytes = uri?.let { getFileSizeBytes(context, it).takeIf { size -> size >= 0L } }
+        errorText = null
+        successText = null
+    }
+
+    val coverPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        selectedCoverUri = uri
+        selectedCoverName = uri?.let { getFileName(context, it) }
+        selectedCoverSizeBytes = uri?.let { getFileSizeBytes(context, it).takeIf { size -> size >= 0L } }
         errorText = null
         successText = null
     }
@@ -815,12 +828,18 @@ fun CreateTabScreen(
                     placeholder = "Введите название трека",
                     keyboardType = KeyboardType.Text,
                     leadingContent = {
-                        Text(
-                            text = "♪",
-                            color = TrackHubGoldLight,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Box(
+                            modifier = Modifier.size(20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "♪",
+                                color = TrackHubGoldLight,
+                                fontSize = 18.sp,
+                                lineHeight = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 )
 
@@ -856,6 +875,26 @@ fun CreateTabScreen(
                     enabled = !isLoading,
                     onClick = {
                         filePickerLauncher.launch("audio/*")
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                TrackHubInputLabel("Фото трека")
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                CoverImagePickerCard(
+                    selectedFileName = selectedCoverName,
+                    selectedFileSizeBytes = selectedCoverSizeBytes,
+                    enabled = !isLoading,
+                    onClick = {
+                        coverPickerLauncher.launch("image/*")
+                    },
+                    onClearClick = {
+                        selectedCoverUri = null
+                        selectedCoverName = null
+                        selectedCoverSizeBytes = null
                     }
                 )
 
@@ -912,6 +951,23 @@ fun CreateTabScreen(
                             return@uploadButton
                         }
 
+                        val coverUri = selectedCoverUri
+                        if (coverUri != null) {
+                            val coverName = selectedCoverName.orEmpty()
+                            val coverExtension = coverName.substringAfterLast('.', "").lowercase()
+
+                            if (coverExtension !in setOf("jpg", "jpeg", "png", "webp")) {
+                                errorText = "Фото трека должно быть JPG, PNG или WEBP"
+                                return@uploadButton
+                            }
+
+                            val coverSizeBytes = selectedCoverSizeBytes ?: getFileSizeBytes(context, coverUri)
+                            if (coverSizeBytes > MAX_TRACK_COVER_SIZE_BYTES) {
+                                errorText = "Фото трека не должно превышать 5 МБ"
+                                return@uploadButton
+                            }
+                        }
+
                         scope.launch {
                             isLoading = true
                             errorText = null
@@ -923,6 +979,7 @@ fun CreateTabScreen(
                                     title = trimmedTitle,
                                     author = trimmedAuthor,
                                     fileUri = fileUri,
+                                    coverImageUri = coverUri,
                                     accessToken = accessToken
                                 )
 
@@ -931,6 +988,9 @@ fun CreateTabScreen(
                                 selectedFileUri = null
                                 selectedFileName = null
                                 selectedFileSizeBytes = null
+                                selectedCoverUri = null
+                                selectedCoverName = null
+                                selectedCoverSizeBytes = null
                                 successText = "Трек успешно загружен"
 
                                 onUploadSuccess(uploadedTrack)
@@ -1125,6 +1185,88 @@ fun AudioFilePickerCard(
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold
         )
+    }
+}
+
+@Composable
+fun CoverImagePickerCard(
+    selectedFileName: String?,
+    selectedFileSizeBytes: Long?,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    onClearClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(68.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black.copy(alpha = 0.70f))
+            .border(1.dp, TrackHubFieldBorder, RoundedCornerShape(18.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(TrackHubGold.copy(alpha = 0.10f))
+                .border(1.dp, TrackHubGoldLight, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "▣",
+                color = TrackHubGoldLight,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = selectedFileName ?: "Добавить фото трека",
+                color = if (selectedFileName == null) TrackHubMutedText else TrackHubText,
+                fontSize = 15.sp,
+                lineHeight = 18.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Text(
+                text = selectedFileSizeBytes?.let { "JPG/PNG/WEBP • ${formatFileSize(it)}" } ?: "Необязательно • до 5 МБ",
+                color = TrackHubMutedText.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
+                maxLines = 1
+            )
+        }
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        if (selectedFileName != null) {
+            Text(
+                text = "Убрать",
+                color = TrackHubGoldLight,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable(enabled = enabled) { onClearClick() }
+            )
+        } else {
+            Text(
+                text = "Выбрать",
+                color = TrackHubGoldLight,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 

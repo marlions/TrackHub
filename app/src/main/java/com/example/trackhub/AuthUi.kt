@@ -116,6 +116,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 
+private val EmailPattern = Regex("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
+
+fun isValidEmail(value: String): Boolean {
+    return EmailPattern.matches(value.trim())
+}
+
 @Composable
 fun AuthScreen(
     onAuthSuccess: (String) -> Unit
@@ -125,8 +131,8 @@ fun AuthScreen(
     var isRegisterMode by remember { mutableStateOf(false) }
 
     var username by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("test@example.com") }
-    var password by remember { mutableStateOf("12345678") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
 
     var isLoading by remember { mutableStateOf(false) }
@@ -135,6 +141,7 @@ fun AuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .dismissKeyboardOnBackgroundTap()
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
@@ -197,7 +204,7 @@ fun AuthScreen(
                         return@validateAndSubmit
                     }
 
-                    if (trimmedEmail.isBlank() || !trimmedEmail.contains("@")) {
+                    if (!isValidEmail(trimmedEmail)) {
                         errorText = "Введите корректный email"
                         return@validateAndSubmit
                     }

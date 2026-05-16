@@ -129,7 +129,8 @@ fun HomeTabScreen(
     onLikeClick: (Track) -> Unit,
     onCommentsClick: (Track) -> Unit,
     onAddToPlaylistClick: (Track) -> Unit,
-    onMoreClick: (Track) -> Unit
+    onMoreClick: (Track) -> Unit,
+    onShuffleLikedClick: () -> Unit
 ) {
     val likedPreviewTracks = remember(likedTracks, tracks) {
         if (likedTracks.isNotEmpty()) {
@@ -192,7 +193,8 @@ fun HomeTabScreen(
                 onPlayClick = onPlayClick,
                 onLikeClick = onLikeClick,
                 onCommentsClick = onCommentsClick,
-                onAddToPlaylistClick = onAddToPlaylistClick
+                onAddToPlaylistClick = onAddToPlaylistClick,
+                onShuffleClick = onShuffleLikedClick
             )
         }
 
