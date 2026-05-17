@@ -18,6 +18,10 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        val localProps = java.util.Properties()
+        localProps.load(rootProject.file("local.properties").inputStream())
+        buildConfigField("String", "BACKEND_URL", "\"${localProps["backend.url"]}\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -36,6 +40,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
