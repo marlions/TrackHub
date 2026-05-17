@@ -10,6 +10,23 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.example.trackhub.ui.theme.TrackHubTheme
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val sessionViewModel: SessionViewModel by viewModels()
@@ -30,16 +47,44 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TrackHubTheme {
-                TrackHubApp(
-                    sessionViewModel = sessionViewModel,
-                    tracksViewModel = tracksViewModel,
-                    playerViewModel = playerViewModel,
-                    commentsViewModel = commentsViewModel,
-                    playlistsViewModel = playlistsViewModel,
-                    usersViewModel = usersViewModel
-                )
+                var showStartupSplash by remember { mutableStateOf(true) }
+
+                LaunchedEffect(Unit) {
+                    delay(1100)
+                    showStartupSplash = false
+                }
+
+                if (showStartupSplash) {
+                    TrackHubStartupSplash()
+                } else {
+                    TrackHubApp(
+                        sessionViewModel = sessionViewModel,
+                        tracksViewModel = tracksViewModel,
+                        playerViewModel = playerViewModel,
+                        commentsViewModel = commentsViewModel,
+                        playlistsViewModel = playlistsViewModel,
+                        usersViewModel = usersViewModel
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun TrackHubStartupSplash() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ComposeColor.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.trackhub_splash_icon),
+            contentDescription = null,
+            modifier = Modifier.size(230.dp),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
