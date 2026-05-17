@@ -1,5 +1,9 @@
+import java.util.Properties
+import org.gradle.api.GradleException
+
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -12,18 +16,34 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.trackhub"
-        minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+    applicationId = "com.example.trackhub"
+    minSdk = 26
+    targetSdk = 36
+    versionCode = 1
+    versionName = "1.0"
 
-        val localProps = java.util.Properties()
-        localProps.load(rootProject.file("local.properties").inputStream())
-        buildConfigField("String", "BACKEND_URL", "\"${localProps["backend.url"]}\"")
+    val localProps = Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { input ->
+            localProps.load(input)
+        }
     }
+
+    val backendUrl = localProps.getProperty("backend.url")
+        ?: throw GradleException(
+            "backend.url is missing. Add backend.url=http://YOUR_SERVER_IP:8000 to local.properties"
+        )
+
+    buildConfigField(
+        "String",
+        "BACKEND_URL",
+        "\"${backendUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+    )
+
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+}
 
     buildTypes {
         release {
